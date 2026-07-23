@@ -108,6 +108,8 @@ let state = {
   coachView: "roster", // roster | detail
   selectedAthleteEmail: null,
   coachBroadcast: "",
+  coachWeekIndex: 0,
+  coachExpandedKey: null,
   // herramientas calculators (local, not persisted)
   toolDistance: "5000",
   toolCustomKm: "",
@@ -1161,10 +1163,12 @@ function renderCoachDetail() {
   const acc = accounts[state.selectedAthleteEmail];
   if (!acc) return renderCoachRoster();
   const profile = acc.profile;
-  const m = computeRenderModel(profile, 0);
+  const weekIndex = Math.max(0, state.coachWeekIndex || 0);
+  const m = computeRenderModel(profile, weekIndex);
   const editableDays = m.planDays.map((d) => ({
     ...d,
     kmDisplay: d.type === "rest" ? 0 : d.km,
+    expanded: state.coachExpandedKey === d.key,
   }));
 
   return `
@@ -1172,7 +1176,7 @@ function renderCoachDetail() {
       <button data-action="backToRoster" style="all:unset;cursor:pointer;width:34px;height:34px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;line-height:32px;">‹</button>
       <div>
         <div style="font-size:24px;font-weight:800;">${esc(profile.fullName || state.selectedAthleteEmail)}</div>
-        <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${m.distInfo.label} · ${m.level} · ${m.pct}% adherencia · ${m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label}</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${m.distInfo.label} · ${m.level} · ${m.pct}% adherencia esta semana · ${m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label}</div>
       </div>
     </div>
 
@@ -1182,19 +1186,44 @@ function renderCoachDetail() {
     </div>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
-      <div style="font-size:15px;font-weight:800;margin-bottom:4px;">Editar plan de la semana</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">Ajustá el tipo de sesión y los km de cada día si hace falta.</div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
+      <div class="plan-header" style="margin-bottom:8px;">
+        <div>
+          <div class="goal-line">${m.goalLine}</div>
+          <div class="phase-full" style="font-size:20px;">${m.phaseLabelFull}</div>
+        </div>
+        <div class="week-nav">
+          <button data-action="coachWeekPrev">‹</button>
+          <button data-action="coachWeekNext">›</button>
+        </div>
+      </div>
+      <div class="weeks-bar" style="margin-bottom:6px;">
+        ${m.weeksMeta.map((w) => `<div class="bar" title="${w.title}" style="height:${w.barHeight}px;background:${w.color}" data-action="coachJumpWeek" data-idx="${w.index}"></div>`).join("")}
+      </div>
+      <div style="font-size:11.5px;color:var(--muted);">Toda la planificación del atleta — recorré las semanas para ver o editar cualquier fase del plan.</div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
+      <div style="font-size:15px;font-weight:800;margin-bottom:4px;">Editar semana ${weekIndex + 1}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">Cambiá el tipo de sesión o los km, y tocá una sesión para ver/editar el detalle completo.</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
         ${editableDays
           .map(
             (d) => `
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="width:40px;font-size:12px;font-weight:700;color:var(--muted);">${d.day}</div>
-            <select data-action="coachSetDayType" data-idx="${d.i}" data-km="${d.kmDisplay}" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:600;">
-              ${PLAN_TYPE_OPTIONS.map(([v, l]) => `<option value="${v}" ${d.typeKey === v ? "selected" : ""}>${l}</option>`).join("")}
-            </select>
-            <input type="number" data-action="coachSetDayKm" data-idx="${d.i}" data-typekey="${d.typeKey}" value="${d.kmDisplay}" style="width:80px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:700;">
-            <span style="font-size:11px;color:var(--muted);width:26px;">km</span>
+          <div class="week-day-card">
+            <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;flex-wrap:wrap;">
+              <div style="width:38px;font-size:12px;font-weight:700;color:var(--muted);flex:none;">${d.day}</div>
+              <select data-action="coachSetDayType" data-idx="${d.i}" data-km="${d.kmDisplay}" style="flex:1;min-width:150px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:600;">
+                ${PLAN_TYPE_OPTIONS.map(([v, l]) => `<option value="${v}" ${d.typeKey === v ? "selected" : ""}>${l}</option>`).join("")}
+              </select>
+              <input type="number" data-action="coachSetDayKm" data-idx="${d.i}" data-typekey="${d.typeKey}" value="${d.kmDisplay}" style="width:70px;flex:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:700;">
+              <span style="font-size:11px;color:var(--muted);width:22px;flex:none;">km</span>
+              ${
+                d.hasSession
+                  ? `<button data-action="coachToggleExpand" data-key="${d.key}" style="all:unset;cursor:pointer;font-size:11px;font-weight:700;color:var(--accent);flex:none;">${d.expanded ? "OCULTAR ▴" : "EDITAR SESIÓN ▾"}</button>`
+                  : ""
+              }
+            </div>
+            ${d.hasSession && d.expanded ? renderBlocksGrid(d.sessionInfo.blocks) : ""}
           </div>`
           )
           .join("")}
@@ -1202,7 +1231,7 @@ function renderCoachDetail() {
     </div>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;">
-      <div style="font-size:15px;font-weight:800;margin-bottom:14px;">Planificación mensual (estimada)</div>
+      <div style="font-size:15px;font-weight:800;margin-bottom:14px;">Planificación mensual (estimada desde semana ${weekIndex + 1})</div>
       <div style="display:flex;align-items:flex-end;gap:10px;height:90px;">
         ${m.monthWeeks
           .map(
@@ -1306,7 +1335,7 @@ function coachSetDay(idx, typeKey, km) {
   if (!acc) return;
   const cfg = SESSION_TYPES[typeKey];
   const finalKm = cfg.type === "rest" ? 0 : km || 8;
-  const key = "0-" + idx;
+  const key = (state.coachWeekIndex || 0) + "-" + idx;
   acc.profile.dayOverrides[key] = { ...cfg, km: finalKm, dist: cfg.type === "rest" ? "—" : finalKm + " km" };
   saveAccounts(accounts);
   render();
@@ -1476,8 +1505,16 @@ const ACTIONS = {
     setProfile((p) => ({ chatMessages: [...p.chatMessages, { from: "athlete", text: state.chatInput, time }] }));
     setState({ chatInput: "" });
   },
-  openAthlete: (el) => setState({ coachView: "detail", selectedAthleteEmail: el.dataset.email }),
+  openAthlete: (el) =>
+    setState({ coachView: "detail", selectedAthleteEmail: el.dataset.email, coachWeekIndex: 0, coachExpandedKey: null }),
   backToRoster: () => setState({ coachView: "roster", selectedAthleteEmail: null }),
+  coachWeekPrev: () => setState((s) => ({ coachWeekIndex: Math.max(0, (s.coachWeekIndex || 0) - 1), coachExpandedKey: null })),
+  coachWeekNext: () => setState((s) => ({ coachWeekIndex: (s.coachWeekIndex || 0) + 1, coachExpandedKey: null })),
+  coachJumpWeek: (el) => setState({ coachWeekIndex: parseInt(el.dataset.idx, 10), coachExpandedKey: null }),
+  coachToggleExpand: (el) => {
+    const key = el.dataset.key;
+    setState({ coachExpandedKey: state.coachExpandedKey === key ? null : key });
+  },
 
   toggleDatePicker: (el) => {
     const path = el.dataset.path;
