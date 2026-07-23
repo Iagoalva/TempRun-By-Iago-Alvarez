@@ -71,11 +71,13 @@ function defaultProfileState() {
     coachMessage: "",
     stravaStatus: "disconnected",
     stravaConnectedAt: null,
+    stravaActivities: {}, // { [weekIndex-dayIndex]: { km, durationMin, pace, syncedAt } }
     chatMessages: [
       { from: "coach", text: "Vamos bien. Cualquier cosa, escribime.", time: "09:14" },
       { from: "athlete", text: "Dale, el fartlek de mañana lo hago a la tarde ¿va bien?", time: "09:20" },
       { from: "coach", text: "Perfecto, mejor con más descanso. Avisame cómo te sentís.", time: "09:22" },
     ],
+    coachReadCount: 3,
     onboardingDone: false,
   };
 }
@@ -112,6 +114,8 @@ let state = {
   coachBroadcast: "",
   coachWeekIndex: 0,
   coachExpandedKey: null,
+  coachChatInput: "",
+  stravaJustSynced: false,
   // herramientas calculators (local, not persisted)
   toolDistance: "5000",
   toolCustomKm: "",
@@ -651,7 +655,7 @@ function renderApp() {
           <button class="${state.theme === "dark" ? "active" : ""}" data-action="setTheme" data-theme="dark">${ICONS.moon} Oscuro</button>
           <button class="${state.theme === "light" ? "active" : ""}" data-action="setTheme" data-theme="light">${ICONS.sun} Claro</button>
         </div>
-        <button class="logout-link" data-action="logout">Cerrar sesión</button>
+        <button class="logout-btn-lg" data-action="logout">Cerrar sesión</button>
       </div>
     </aside>
 
@@ -767,7 +771,20 @@ function renderSessionBody(d, expandedForced) {
           </div>
         </div>
       </div>
-      ${expanded ? renderBlocksGrid(d.sessionInfo.blocks) : ""}
+      ${expanded ? renderStravaActual(state.profile, d.key) + renderBlocksGrid(d.sessionInfo.blocks) : ""}
+    </div>`;
+}
+
+function renderStravaActual(profile, key) {
+  const act = profile.stravaActivities && profile.stravaActivities[key];
+  if (!act) return "";
+  return `
+    <div class="strava-actual-row">
+      ${ICONS.strava}
+      <div>
+        <div class="strava-actual-label">REGISTRADO CON STRAVA</div>
+        <div class="strava-actual-value">${act.km} km · ${act.durationMin} min · ${act.pace} /km</div>
+      </div>
     </div>`;
 }
 
@@ -844,7 +861,7 @@ function renderPlan(m) {
                   <button class="done-btn" style="background:${d.done ? "color-mix(in oklch, var(--good) 20%, transparent)" : "var(--surface2)"};color:${d.done ? "var(--good)" : "var(--text)"}" data-action="toggleDoneStop" data-key="${d.key}">${d.done ? "COMPLETADO ✓" : "MARCAR COMPLETADO"}</button>
                 </div>
               </div>
-              ${d.expanded ? renderBlocksGrid(d.sessionInfo.blocks) : ""}
+              ${d.expanded ? renderStravaActual(state.profile, d.key) + renderBlocksGrid(d.sessionInfo.blocks) : ""}
             </div>`;
         })
         .join("")}
@@ -995,17 +1012,21 @@ function renderPerfil() {
       <div class="strava-heading">${ICONS.strava} STRAVA</div>
       ${
         s.stravaStatus === "disconnected"
-          ? `<div class="strava-desc">Conectá tu cuenta para sincronizar automáticamente tus km y marcar entrenamientos completados.</div>
+          ? `<div class="strava-desc">Conectá tu cuenta para vincular el ritmo y el tiempo real de tus carreras a esta app.</div>
              <button class="btn-accent" style="width:auto;padding:11px 20px;margin:0;" data-action="connectStrava">Conectar con Strava</button>`
           : s.stravaStatus === "connecting"
           ? `<div class="strava-connecting"><div class="spinner-sm"></div><div style="font-size:13px;color:var(--muted);">Redirigiendo a Strava para autorizar...</div></div>`
           : `<div class="strava-connected-row">
                <div style="display:flex;align-items:center;gap:10px;">
                  <span class="dot-good"></span>
-                 <div><div style="font-size:13px;font-weight:700;">Cuenta conectada</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px;">Conectado · última sincronización hace unos segundos</div></div>
+                 <div><div style="font-size:13px;font-weight:700;">Cuenta conectada</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px;">${state.stravaJustSynced ? "Última actividad sincronizada ahora" : "Esperando tu próxima carrera"}</div></div>
                </div>
-               <button class="logout-link" style="background:var(--surface2);padding:9px 16px;border-radius:8px;" data-action="disconnectStrava">Desconectar</button>
-             </div>`
+               <div style="display:flex;gap:8px;">
+                 <button class="btn-accent" style="width:auto;padding:9px 16px;margin:0;font-size:12.5px;" data-action="syncStravaActivity">Sincronizar entrenamiento</button>
+                 <button class="logout-link" style="background:var(--surface2);padding:9px 16px;border-radius:8px;" data-action="disconnectStrava">Desconectar</button>
+               </div>
+             </div>
+             <div class="strava-desc" style="margin:12px 0 0;">Simulación: te trae tu próxima sesión pendiente del plan y le carga un ritmo y tiempo reales, como haría una sincronización real de Strava.</div>`
       }
     </div>
 
@@ -1036,8 +1057,8 @@ function renderPerfil() {
       </div>
     </div>
 
-    <div style="margin-top:32px;">
-      <button class="btn-outline-block" style="max-width:220px;" data-action="logout">Cerrar sesión</button>
+    <div style="margin-top:32px;max-width:420px;">
+      <button class="btn-outline-block" style="padding:16px 0;font-size:15.5px;" data-action="logout">Cerrar sesión</button>
     </div>`;
 }
 
@@ -1048,6 +1069,11 @@ function getAllAthleteAccounts() {
   return Object.entries(accounts)
     .filter(([email, acc]) => acc.role !== "coach" && acc.profile && acc.profile.onboardingDone)
     .map(([email, acc]) => ({ email, acc }));
+}
+
+function unreadCountFor(profile) {
+  const readCount = profile.coachReadCount || 0;
+  return profile.chatMessages.slice(readCount).filter((m) => m.from === "athlete").length;
 }
 
 function getAthleteSummaries() {
@@ -1064,6 +1090,7 @@ function getAthleteSummaries() {
       loadLabel: m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label,
       loadColor: m.weekMeta.isDeload ? "var(--warn)" : m.acwrStatus.color,
       alert: isBad,
+      unread: unreadCountFor(acc.profile),
       sync: acc.profile.stravaStatus === "connected" ? "Strava" : "—",
     };
   });
@@ -1117,6 +1144,7 @@ function renderCoachApp() {
                     <button class="coach-athlete-btn ${state.coachView === "detail" && state.selectedAthleteEmail === a.email ? "active" : ""}" data-action="openAthlete" data-email="${esc(a.email)}">
                       ${a.alert ? `<span class="coach-athlete-alert-dot" title="Riesgo"></span>` : ""}
                       <span class="coach-athlete-name">${esc(a.name)}</span>
+                      ${a.unread > 0 ? `<span class="athlete-unread-badge" title="${a.unread} mensaje${a.unread > 1 ? "s" : ""} sin leer">${a.unread}</span>` : ""}
                     </button>`
                     )
                     .join("")}
@@ -1135,7 +1163,7 @@ function renderCoachApp() {
           <button class="${state.theme === "dark" ? "active" : ""}" data-action="setTheme" data-theme="dark">${ICONS.moon} Oscuro</button>
           <button class="${state.theme === "light" ? "active" : ""}" data-action="setTheme" data-theme="light">${ICONS.sun} Claro</button>
         </div>
-        <button class="logout-link" data-action="logout">Cerrar sesión</button>
+        <button class="logout-btn-lg" data-action="logout">Cerrar sesión</button>
       </div>
     </aside>
     <main class="app-content">
@@ -1197,7 +1225,7 @@ function renderCoachRoster(athletes) {
             .map(
               (a) => `
             <div data-action="openAthlete" data-email="${esc(a.email)}" style="display:flex;align-items:center;padding:13px 18px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;">
-              <div style="flex:2;font-weight:700;display:flex;align-items:center;gap:8px;">${esc(a.name)}${a.alert ? `<span title="Riesgo" style="width:8px;height:8px;border-radius:50%;background:var(--bad);display:inline-block;"></span>` : ""}</div>
+              <div style="flex:2;font-weight:700;display:flex;align-items:center;gap:8px;">${esc(a.name)}${a.alert ? `<span title="Riesgo" style="width:8px;height:8px;border-radius:50%;background:var(--bad);display:inline-block;"></span>` : ""}${a.unread > 0 ? `<span class="athlete-unread-badge" title="${a.unread} mensaje${a.unread > 1 ? "s" : ""} sin leer">${a.unread}</span>` : ""}</div>
               <div style="flex:1;color:var(--muted);">${a.groupLabel}</div>
               <div style="flex:1;color:var(--muted);">${a.level}</div>
               <div style="flex:1;font-weight:700;">${a.adherence}%</div>
@@ -1232,8 +1260,29 @@ function renderCoachDetail() {
     </div>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
-      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.4px;margin-bottom:8px;">MENSAJE PERSONALIZADO PARA ${esc((profile.fullName || "").split(" ")[0].toUpperCase())}</div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.4px;margin-bottom:8px;">MENSAJE FIJO EN EL PANEL DE ${esc((profile.fullName || "").split(" ")[0].toUpperCase())}</div>
       <textarea data-action="athleteMessageInput" style="width:100%;min-height:70px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;resize:vertical;" placeholder="Escribí un mensaje solo para este atleta...">${esc(profile.coachMessage || "")}</textarea>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
+      <div style="font-size:15px;font-weight:800;margin-bottom:14px;">Chat con ${esc((profile.fullName || "el atleta").split(" ")[0])}</div>
+      <div class="chat-box" style="min-height:auto;max-height:280px;overflow-y:auto;">
+        ${profile.chatMessages
+          .map(
+            (msg) => `
+          <div class="chat-bubble-row" style="justify-content:${msg.from === "athlete" ? "flex-start" : "flex-end"}">
+            <div class="chat-bubble" style="background:${msg.from === "athlete" ? "var(--surface2)" : "var(--accent)"};color:${msg.from === "athlete" ? "var(--text)" : "var(--accent-ink)"}">
+              <div class="msg-text">${esc(msg.text)}</div>
+              <div class="msg-time">${msg.time}</div>
+            </div>
+          </div>`
+          )
+          .join("")}
+      </div>
+      <div class="chat-input-row">
+        <input placeholder="Responderle..." data-bind="coachChatInput" value="${esc(state.coachChatInput)}" data-enter-action="coachSendMessage">
+        <button class="chat-send-btn" data-action="coachSendMessage">Enviar</button>
+      </div>
     </div>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
@@ -1274,7 +1323,7 @@ function renderCoachDetail() {
                   : ""
               }
             </div>
-            ${d.hasSession && d.expanded ? renderBlocksGrid(d.sessionInfo.blocks) : ""}
+            ${d.hasSession && d.expanded ? renderStravaActual(profile, d.key) + renderBlocksGrid(d.sessionInfo.blocks) : ""}
           </div>`
           )
           .join("")}
@@ -1548,7 +1597,39 @@ const ACTIONS = {
     setProfile({ stravaStatus: "connecting" });
     setTimeout(() => setProfile({ stravaStatus: "connected", stravaConnectedAt: Date.now() }), 1600);
   },
-  disconnectStrava: () => setProfile({ stravaStatus: "disconnected", stravaConnectedAt: null }),
+  disconnectStrava: () => setProfile({ stravaStatus: "disconnected", stravaConnectedAt: null, stravaActivities: {} }),
+  syncStravaActivity: () => {
+    const s = state.profile;
+    let target = null;
+    for (let w = state.weekIndex; w < state.weekIndex + 6; w++) {
+      const model = computeRenderModel(s, w);
+      const pending = model.planDays.find((d) => d.hasSession && !d.done);
+      if (pending) {
+        target = { weekIndex: model.weekIndex, day: pending, paces: model.paces };
+        break;
+      }
+    }
+    if (!target) return;
+    const plannedKm = target.day.km;
+    const paceBaseStr = target.day.type === "hard" ? target.paces.threshold : target.paces.easy;
+    const paceBaseMin = paceToMinutes(paceBaseStr);
+    const distVariance = 0.92 + Math.random() * 0.14;
+    const paceVariance = 0.95 + Math.random() * 0.12;
+    const actualKm = Math.max(1, Math.round(plannedKm * distVariance * 10) / 10);
+    const actualPaceMin = paceBaseMin * paceVariance;
+    const durationMin = Math.max(1, Math.round(actualKm * actualPaceMin));
+    const pm = Math.floor(actualPaceMin);
+    const ps = Math.round((actualPaceMin - pm) * 60);
+    const paceStr = `${pm}:${String(ps).padStart(2, "0")}`;
+    const key = target.weekIndex + "-" + target.day.i;
+
+    setProfile((p) => ({
+      completed: { ...p.completed, [key]: true },
+      stravaActivities: { ...p.stravaActivities, [key]: { km: actualKm, durationMin, pace: paceStr, syncedAt: Date.now() } },
+      stravaConnectedAt: Date.now(),
+    }));
+    setState({ stravaJustSynced: true, weekIndex: target.weekIndex, expandedKey: key });
+  },
   sendMessage: () => {
     if (!state.chatInput.trim()) return;
     const now = new Date();
@@ -1556,8 +1637,16 @@ const ACTIONS = {
     setProfile((p) => ({ chatMessages: [...p.chatMessages, { from: "athlete", text: state.chatInput, time }] }));
     setState({ chatInput: "" });
   },
-  openAthlete: (el) =>
-    setState({ coachView: "detail", selectedAthleteEmail: el.dataset.email, coachWeekIndex: 0, coachExpandedKey: null }),
+  openAthlete: (el) => {
+    const email = el.dataset.email;
+    const accounts = loadAccounts();
+    const acc = accounts[email];
+    if (acc && acc.profile) {
+      acc.profile.coachReadCount = acc.profile.chatMessages.length;
+      saveAccounts(accounts);
+    }
+    setState({ coachView: "detail", selectedAthleteEmail: email, coachWeekIndex: 0, coachExpandedKey: null, coachChatInput: "" });
+  },
   backToRoster: () => setState({ coachView: "roster", selectedAthleteEmail: null }),
   coachWeekPrev: () => setState((s) => ({ coachWeekIndex: Math.max(0, (s.coachWeekIndex || 0) - 1), coachExpandedKey: null })),
   coachWeekNext: () => setState((s) => ({ coachWeekIndex: (s.coachWeekIndex || 0) + 1, coachExpandedKey: null })),
@@ -1565,6 +1654,18 @@ const ACTIONS = {
   coachToggleExpand: (el) => {
     const key = el.dataset.key;
     setState({ coachExpandedKey: state.coachExpandedKey === key ? null : key });
+  },
+  coachSendMessage: () => {
+    if (!state.coachChatInput.trim()) return;
+    const accounts = loadAccounts();
+    const acc = accounts[state.selectedAthleteEmail];
+    if (!acc) return;
+    const now = new Date();
+    const time = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+    acc.profile.chatMessages = [...acc.profile.chatMessages, { from: "coach", text: state.coachChatInput, time }];
+    acc.profile.coachReadCount = acc.profile.chatMessages.length;
+    saveAccounts(accounts);
+    setState({ coachChatInput: "" });
   },
 
   toggleDatePicker: (el) => {

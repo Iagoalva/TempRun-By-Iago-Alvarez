@@ -871,6 +871,44 @@ button {
   text-align: left;
 }
 
+.logout-btn-lg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 13.5px;
+  padding: 12px 0;
+  border-radius: 10px;
+}
+.logout-btn-lg:hover {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.athlete-unread-badge {
+  flex: none;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+.coach-athlete-btn .athlete-unread-badge {
+  margin-left: auto;
+}
+
 .app-content {
   flex: 1;
   min-width: 0;
@@ -1445,6 +1483,27 @@ button {
   margin-top: 12px;
   flex-wrap: wrap;
   gap: 12px;
+}
+.strava-actual-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 18px 14px;
+  padding: 10px 14px;
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface2));
+  border: 1px solid color-mix(in oklch, var(--accent) 35%, transparent);
+  border-radius: 10px;
+}
+.strava-actual-label {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+}
+.strava-actual-value {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 2px;
 }
 .dot-good {
   width: 9px;
