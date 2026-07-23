@@ -23,6 +23,8 @@ const SESSION_KEY = "temprun_session";
 const COACH_EMAIL = "coach@temprun.club";
 const COACH_PASSWORD = "TempRun2026";
 const GROUP_LABELS = { "5k": "5K", "10k": "10K", "21k": "21K", "42k": "42K" };
+const GROUP_ORDER = ["5k", "10k", "21k", "42k"];
+const LEVEL_ORDER = ["Inicial", "Principiante", "Intermedio"];
 const PLAN_TYPE_OPTIONS = [
   ["rest", "Descanso"],
   ["easy", "Rodaje suave"],
@@ -1048,7 +1050,40 @@ function getAllAthleteAccounts() {
     .map(([email, acc]) => ({ email, acc }));
 }
 
+function getAthleteSummaries() {
+  return getAllAthleteAccounts().map(({ email, acc }) => {
+    const m = computeRenderModel(acc.profile, 0);
+    const isBad = m.acwrStatus.color === "var(--bad)" && !m.weekMeta.isDeload;
+    return {
+      email,
+      name: acc.profile.fullName || email,
+      groupKey: m.distInfo.key,
+      groupLabel: m.distInfo.label,
+      level: m.level,
+      adherence: m.pct,
+      loadLabel: m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label,
+      loadColor: m.weekMeta.isDeload ? "var(--warn)" : m.acwrStatus.color,
+      alert: isBad,
+      sync: acc.profile.stravaStatus === "connected" ? "Strava" : "—",
+    };
+  });
+}
+
 function renderCoachApp() {
+  const athletes = getAthleteSummaries();
+  const levelGroups = LEVEL_ORDER.map((level) => {
+    const inLevel = athletes.filter((a) => a.level === level);
+    const groupKeys = GROUP_ORDER.filter((gk) => inLevel.some((a) => a.groupKey === gk));
+    return {
+      level,
+      groups: groupKeys.map((gk) => ({
+        groupKey: gk,
+        groupLabel: GROUP_LABELS[gk] || gk,
+        athletes: inLevel.filter((a) => a.groupKey === gk),
+      })),
+    };
+  }).filter((lg) => lg.groups.length > 0);
+
   return `
   <div class="app-shell">
     <aside class="app-sidebar">
@@ -1060,8 +1095,40 @@ function renderCoachApp() {
         </div>
       </div>
       <nav class="sidebar-nav">
-        <button class="active">${ICONS.people}<span class="nav-label">Panel de atletas</span></button>
+        <button class="${state.coachView === "roster" ? "active" : ""}" data-action="backToRoster">${ICONS.people}<span class="nav-label">Panel de atletas</span></button>
       </nav>
+      ${
+        levelGroups.length > 0
+          ? `
+        <div class="coach-roster-nav">
+          ${levelGroups
+            .map(
+              (lg) => `
+            <div class="coach-level-block">
+              <div class="coach-level-label">${lg.level.toUpperCase()}</div>
+              ${lg.groups
+                .map(
+                  (gr) => `
+                <div class="coach-group-block">
+                  <div class="coach-group-label">${gr.groupLabel} <span class="coach-group-count">${gr.athletes.length}</span></div>
+                  ${gr.athletes
+                    .map(
+                      (a) => `
+                    <button class="coach-athlete-btn ${state.coachView === "detail" && state.selectedAthleteEmail === a.email ? "active" : ""}" data-action="openAthlete" data-email="${esc(a.email)}">
+                      ${a.alert ? `<span class="coach-athlete-alert-dot" title="Riesgo"></span>` : ""}
+                      <span class="coach-athlete-name">${esc(a.name)}</span>
+                    </button>`
+                    )
+                    .join("")}
+                </div>`
+                )
+                .join("")}
+            </div>`
+            )
+            .join("")}
+        </div>`
+          : ""
+      }
       <div class="sidebar-footer">
         <div class="footer-label">TEMA</div>
         <div class="theme-toggle-row">
@@ -1073,29 +1140,13 @@ function renderCoachApp() {
     </aside>
     <main class="app-content">
       <div class="content-inner">
-        ${state.coachView === "detail" && state.selectedAthleteEmail ? renderCoachDetail() : renderCoachRoster()}
+        ${state.coachView === "detail" && state.selectedAthleteEmail ? renderCoachDetail() : renderCoachRoster(athletes)}
       </div>
     </main>
   </div>`;
 }
 
-function renderCoachRoster() {
-  const athletes = getAllAthleteAccounts().map(({ email, acc }) => {
-    const m = computeRenderModel(acc.profile, 0);
-    const isBad = m.acwrStatus.color === "var(--bad)" && !m.weekMeta.isDeload;
-    return {
-      email,
-      name: acc.profile.fullName || email,
-      groupLabel: m.distInfo.label,
-      level: m.level,
-      adherence: m.pct,
-      loadLabel: m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label,
-      loadColor: m.weekMeta.isDeload ? "var(--warn)" : m.acwrStatus.color,
-      alert: isBad,
-      sync: acc.profile.stravaStatus === "connected" ? "Strava" : "—",
-    };
-  });
-
+function renderCoachRoster(athletes) {
   const avgAdherence = athletes.length ? Math.round(athletes.reduce((sum, a) => sum + a.adherence, 0) / athletes.length) : 0;
   const alertsCount = athletes.filter((a) => a.alert).length;
 

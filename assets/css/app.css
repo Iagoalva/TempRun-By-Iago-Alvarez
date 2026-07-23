@@ -745,6 +745,82 @@ button {
   color: var(--text);
 }
 
+.coach-roster-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  overflow-y: auto;
+}
+.coach-level-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.coach-level-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  color: var(--accent);
+  padding: 0 4px;
+}
+.coach-group-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+.coach-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 4px 8px 2px;
+}
+.coach-group-count {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface2);
+  border-radius: 20px;
+  padding: 1px 6px;
+}
+.coach-athlete-btn {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.coach-athlete-btn:hover,
+.coach-athlete-btn.active {
+  background: var(--surface2);
+  color: var(--text);
+}
+.coach-athlete-alert-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bad);
+  flex: none;
+}
+.coach-athlete-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-footer {
   margin-top: auto;
   border-top: 1px solid var(--border);
@@ -1449,6 +1525,9 @@ button {
   .sidebar-nav {
     flex-direction: row;
     flex: 1;
+  }
+  .coach-roster-nav {
+    display: none;
   }
   .sidebar-footer {
     display: none;
