@@ -24,7 +24,6 @@ const COACH_EMAIL = "coach@temprun.club";
 const COACH_PASSWORD = "TempRun2026";
 const GROUP_LABELS = { "5k": "5K", "10k": "10K", "21k": "21K", "42k": "42K" };
 const GROUP_ORDER = ["5k", "10k", "21k", "42k"];
-const LEVEL_ORDER = ["Inicial", "Principiante", "Intermedio"];
 const PLAN_TYPE_OPTIONS = [
   ["rest", "Descanso"],
   ["easy", "Rodaje suave"],

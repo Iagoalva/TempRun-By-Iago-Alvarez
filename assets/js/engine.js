@@ -19,7 +19,13 @@ const RATIOS = {
 };
 const PHASE_QUALITY = { base: 1, dev: 2, specific: 2, taper: 1 };
 const PHASE_NAMES = { base: "Base", dev: "Desarrollo", specific: "Específico", taper: "Tapering" };
-const LEVEL_WEEKLY_KM = { Inicial: { min: 8, max: 20 }, Principiante: { min: 15, max: 40 }, Intermedio: { min: 25, max: 60 } };
+const LEVEL_WEEKLY_KM = {
+  Inicial: { min: 8, max: 20 },
+  "Principiante Bajo": { min: 10, max: 25 },
+  Principiante: { min: 15, max: 40 },
+  Intermedio: { min: 25, max: 60 },
+};
+const LEVEL_ORDER = ["Inicial", "Principiante Bajo", "Principiante", "Intermedio"];
 const MIN_AVAIL_DAYS = 3;
 const DAY_KEYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 const CACO_TABLE = [
@@ -32,6 +38,10 @@ const CACO_TABLE = [
   { runSec: 480, walkSec: 60, reps: 3 },
   { runSec: 1800, walkSec: 0, reps: 1 },
 ];
+const CACO_SHORT_LEN = 4; // "Principiante Bajo" hace solo los primeros 4 escalones del CACO
+const BRIDGE_WEEKS_INICIAL = 1; // semana puente (rodajes + 1 fartlek suave) al final del CACO de Inicial
+const RAMP_WEEKS_PRINCIPIANTE = 2; // semanas de solo rodajes antes del primer fartlek para Principiante
+const NOVICE_LEVELS = new Set(["Inicial", "Principiante Bajo"]);
 
 function ageFromBirthdate(str) {
   if (!str) return 30;
@@ -70,7 +80,7 @@ function computeVdot(pbs, level) {
     const v = vdotFromPerf(distMap[key], sec);
     if (v >= 15 && v <= 85) return v;
   }
-  return { Inicial: 26, Principiante: 34, Intermedio: 44 }[level] || 30;
+  return { Inicial: 26, "Principiante Bajo": 30, Principiante: 34, Intermedio: 44 }[level] || 30;
 }
 function computePaces(vdot) {
   const safeVdot = Math.min(85, Math.max(15, vdot));
@@ -115,6 +125,9 @@ function levelFromAnswers(a) {
   const hasPlanOrRace = a.q5 === "si";
   if (!regular && !sustains30 && !hasPlanOrRace) return "Inicial";
   if (experienced && kmOk && sustains30) return "Intermedio";
+  // resto de casos: corre o hizo alguna carrera, pero todavía no sostiene 30 min cómodo
+  // → arranca con un CACO corto en vez de ir directo a fartlek
+  if (!sustains30) return "Principiante Bajo";
   return "Principiante";
 }
 function weekAdherence(completed, weekIdx, trainDays) {
@@ -127,6 +140,26 @@ function weekAdherence(completed, weekIdx, trainDays) {
   }
   if (!any) return null;
   return Math.min(1, done / Math.max(1, trainDays));
+}
+
+// Tipo de semana dentro de la fase Base para niveles que necesitan una rampa de adaptación:
+// 'caco'   → progresión caminar-correr (Inicial: tabla completa; Principiante Bajo: primeros 4 escalones)
+// 'bridge' → semana puente al final del CACO de Inicial: rodajes + 1 fartlek suave, antes de Desarrollo
+// 'ramp'   → semanas de solo rodajes (sin sesión de calidad) antes del primer fartlek
+// 'normal' → estructura estándar de la fase
+function getWeekProgramType(level, phaseKey, weekInPhase, phaseWeeksTotal) {
+  if (phaseKey !== "base") return "normal";
+  if (level === "Inicial") {
+    const bridgeStart = Math.max(0, phaseWeeksTotal - BRIDGE_WEEKS_INICIAL);
+    return weekInPhase < bridgeStart ? "caco" : "bridge";
+  }
+  if (level === "Principiante Bajo") {
+    return weekInPhase < CACO_SHORT_LEN ? "caco" : "ramp";
+  }
+  if (level === "Principiante") {
+    return weekInPhase < RAMP_WEEKS_PRINCIPIANTE ? "ramp" : "normal";
+  }
+  return "normal";
 }
 
 function buildMacrocycle(s, paces, level) {
@@ -155,8 +188,8 @@ function buildMacrocycle(s, paces, level) {
   totalWeeks = cursor;
 
   const age = ageFromBirthdate(s.birthdate);
-  const ratio = level === "Inicial" || age >= 45 ? 2 : 3;
-  const growth = level === "Inicial" ? 0.06 : level === "Intermedio" ? 0.1 : 0.09;
+  const ratio = NOVICE_LEVELS.has(level) || age >= 45 ? 2 : 3;
+  const growth = level === "Inicial" ? 0.06 : level === "Principiante Bajo" ? 0.07 : level === "Intermedio" ? 0.1 : 0.09;
 
   const availCount = Math.max(MIN_AVAIL_DAYS, DAY_KEYS.filter((k) => s.availability[k]).length);
   const range = LEVEL_WEEKLY_KM[level] || LEVEL_WEEKLY_KM.Intermedio;
@@ -172,15 +205,23 @@ function buildMacrocycle(s, paces, level) {
   const weeks = [];
   for (let i = 0; i < totalWeeks; i++) {
     const phase = phaseList.find((p) => i >= p.start && i < p.end);
+    const weekInPhase = i - phase.start;
+    const programType = getWeekProgramType(level, phase.key, weekInPhase, phase.weeks);
     let isDeload = false;
     if (phase.key === "taper") {
-      const pos = i - phase.start;
+      const pos = weekInPhase;
       const factors = [0.75, 0.55, 0.35];
       current = peakVol * factors[Math.min(pos, factors.length - 1)];
-    } else if (level === "Inicial" && phase.key === "base") {
-      const cfg = CACO_TABLE[Math.min(i - phase.start, CACO_TABLE.length - 1)];
+    } else if (programType === "caco") {
+      const stepIdx = Math.min(weekInPhase, CACO_TABLE.length - 1);
+      const cfg = CACO_TABLE[stepIdx];
       const perDayKm = ((cfg.runSec * cfg.reps) / 60) / paceToMinutes(paces.easy);
-      current = Math.round(perDayKm * availCount * 10) / 10;
+      let cacoVol = Math.round(perDayKm * availCount * 10) / 10;
+      // si se agotó la tabla (Inicial con fase Base larga), repetimos el último escalón
+      // pero seguimos subiendo el volumen un poco cada semana en vez de dejarlo plano
+      const overflowWeeks = weekInPhase - (CACO_TABLE.length - 1);
+      if (overflowWeeks > 0) cacoVol = Math.round(cacoVol * (1 + 0.03 * overflowWeeks) * 10) / 10;
+      current = cacoVol;
       peakVol = Math.max(peakVol, current);
     } else {
       sinceDeload++;
@@ -212,7 +253,9 @@ function buildMacrocycle(s, paces, level) {
       volume: Math.round(current * 10) / 10,
       isDeload,
       isLastTaperWeek,
-      weekInPhase: i - phase.start,
+      weekInPhase,
+      phaseWeeksTotal: phase.weeks,
+      programType,
       adjustNote: lastAdjustNote || "",
     });
     lastAdjustNote = "";
@@ -234,20 +277,26 @@ function buildWeekDays(weekMeta, availability, paces, level, distInfo) {
   let avail = DAY_KEYS.filter((k) => availability[k]);
   if (avail.length === 0) avail = DAY_KEYS.slice();
   const longDay = avail[avail.length - 1];
-  let qCount = weekMeta.isLastTaperWeek ? 0 : weekMeta.isDeload ? Math.max(0, PHASE_QUALITY[weekMeta.phaseKey] - 1) : PHASE_QUALITY[weekMeta.phaseKey];
-  const isCacoPhase = level === "Inicial" && weekMeta.phaseKey === "base";
-  if (isCacoPhase) qCount = 0;
+  const programType = weekMeta.programType || "normal"; // 'caco' | 'bridge' | 'ramp' | 'normal'
+  const isCacoPhase = programType === "caco";
+  const isNovice = NOVICE_LEVELS.has(level);
+
+  let qCount;
+  if (weekMeta.isLastTaperWeek || isCacoPhase || programType === "ramp") qCount = 0;
+  else if (programType === "bridge") qCount = 1;
+  else qCount = weekMeta.isDeload ? Math.max(0, PHASE_QUALITY[weekMeta.phaseKey] - 1) : PHASE_QUALITY[weekMeta.phaseKey];
   qCount = Math.min(qCount, Math.max(0, avail.length - 1));
+
   const qualityDays = avail.filter((d) => d !== longDay).slice(0, qCount);
   const volume = weekMeta.volume;
-  const longFloor = level === "Inicial" ? 3 : 6;
+  const longFloor = isNovice ? 3 : 6;
   const longKm = Math.min(Math.round(distInfo.km * 1.15 * 10) / 10, Math.max(longFloor, Math.round(volume * 0.28)));
   const remainingAfterLong = Math.max(0, volume - longKm);
-  const qualityFloor = level === "Inicial" ? 2.5 : 5;
+  const qualityFloor = isNovice ? 2.5 : 5;
   const perQualityKm = qCount > 0 ? Math.max(qualityFloor, Math.round(((remainingAfterLong * 0.35) / qCount) * 10) / 10) : 0;
   const easyDaysList = avail.filter((d) => d !== longDay && !qualityDays.includes(d));
   const remainingForEasy = Math.max(0, remainingAfterLong - perQualityKm * qCount);
-  const easyFloor = level === "Inicial" ? 2 : 3;
+  const easyFloor = isNovice ? 2 : 3;
   const perEasyKm = easyDaysList.length > 0 ? Math.max(easyFloor, Math.round((remainingForEasy / easyDaysList.length) * 10) / 10) : 0;
   const cacoCfg = isCacoPhase ? CACO_TABLE[Math.min(weekMeta.weekInPhase, CACO_TABLE.length - 1)] : null;
   const cacoWeekNum = isCacoPhase ? Math.min(weekMeta.weekInPhase + 1, CACO_TABLE.length) : 0;
@@ -275,15 +324,16 @@ function buildWeekDays(weekMeta, availability, paces, level, distInfo) {
     }
     if (qualityDays.includes(k)) {
       if (weekMeta.phaseKey === "specific") return { day: k, workout: "Ritmo de carrera", dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
+      if (programType === "bridge") return { day: k, workout: "Fartlek suave", dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
       if (weekMeta.phaseKey === "base") return { day: k, workout: "Fartlek", dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
-      const reps = { Inicial: 4, Principiante: 6, Intermedio: 8 }[level] || 6;
+      const reps = { Inicial: 4, "Principiante Bajo": 5, Principiante: 6, Intermedio: 8 }[level] || 6;
       const distEach = 800;
       return { day: k, workout: `Series ${reps}x${distEach}m`, dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
     }
     return { day: k, workout: "Rodaje suave", dist: perEasyKm + " km", km: perEasyKm, type: "easy" };
   });
   const easyMinPerKm = paceToMinutes(paces.easy);
-  const sessionMinFloor = level === "Inicial" ? 22 : 40;
+  const sessionMinFloor = isNovice ? 22 : 40;
   const minKm = Math.max(2, Math.round((sessionMinFloor / easyMinPerKm) * 10) / 10);
   const maxKm = Math.min(40, Math.round((120 / easyMinPerKm) * 10) / 10);
   return days.map((d) => (d.type === "rest" || d.isCaco ? d : { ...d, km: Math.min(maxKm, Math.max(minKm, d.km)), dist: Math.min(maxKm, Math.max(minKm, d.km)) + " km" }));
@@ -336,13 +386,20 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
       { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: restKm.toFixed(1) + "km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote regenerativo + estiramiento." },
     ];
   } else if (d.workout.toLowerCase().includes("fartlek")) {
-    typeTag = "FARTLEK";
-    title = `FARTLEK (${km} KM)`;
-    blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "2km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + movilidad articular." },
-      { label: "PRINCIPAL", name: "Juego de ritmos", dist: Math.max(km - 3.5, 1).toFixed(1) + "km", pace: `${paces.interval}/${paces.easy}`, zone: "Z3/Z4", fc: karvonen(0.75, 0.85, fcRest, fcMax), time: "25 min", desc: "Cambios de ritmo: 1 min ágil (Z4) / 1 min suave (Z2). Ideal para activar el sistema aeróbico." },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "5 min", desc: "Caminata o trote regenerativo." },
-    ];
+    const isSoft = d.workout.toLowerCase().includes("suave");
+    typeTag = isSoft ? "FARTLEK SUAVE" : "FARTLEK";
+    title = isSoft ? `FARTLEK SUAVE · ADAPTACIÓN (${km} KM)` : `FARTLEK (${km} KM)`;
+    blocks = isSoft
+      ? [
+          { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + movilidad articular." },
+          { label: "PRINCIPAL", name: "Juego de ritmos suave", dist: Math.max(km - 3, 1).toFixed(1) + "km", pace: `${paces.marathon}/${paces.easy}`, zone: "Z2/Z3", fc: karvonen(0.65, 0.75, fcRest, fcMax), time: "15 min", desc: "Primer contacto con cambios de ritmo: 1 min moderado (Z3) / 2 min suave (Z2). Nada de esfuerzo máximo — es adaptación." },
+          { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Caminata o trote regenerativo." },
+        ]
+      : [
+          { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "2km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + movilidad articular." },
+          { label: "PRINCIPAL", name: "Juego de ritmos", dist: Math.max(km - 3.5, 1).toFixed(1) + "km", pace: `${paces.interval}/${paces.easy}`, zone: "Z3/Z4", fc: karvonen(0.75, 0.85, fcRest, fcMax), time: "25 min", desc: "Cambios de ritmo: 1 min ágil (Z4) / 1 min suave (Z2). Ideal para activar el sistema aeróbico." },
+          { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "5 min", desc: "Caminata o trote regenerativo." },
+        ];
   } else if (d.type === "long") {
     const isSpecific = d.workout.toLowerCase().includes("ritmo objetivo");
     typeTag = "FONDO";
