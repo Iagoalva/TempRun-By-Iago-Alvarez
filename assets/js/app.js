@@ -114,8 +114,97 @@ let state = {
   toolH: "",
   toolM: "",
   toolS: "",
-  toolConvPace: "",
+  // custom date picker
+
+  openDatePicker: null, // bind path currently open, or null
+  datePickerView: {}, // { [path]: { year, month } } month is 0-11
 };
+
+/* ---------------- CUSTOM DATE PICKER ---------------- */
+
+const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+const WEEKDAY_LETTERS = ["L", "M", "X", "J", "V", "S", "D"];
+
+function formatDateDisplay(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return "";
+  return `${d}/${m}/${y}`;
+}
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+function isoFromYmd(y, m, d) {
+  return `${y}-${pad2(m + 1)}-${pad2(d)}`;
+}
+function daysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function renderDatePicker(path, isoValue, opts) {
+  opts = opts || {};
+  const minYear = opts.minYear || 1940;
+  const maxYear = opts.maxYear || new Date().getFullYear();
+  const isOpen = state.openDatePicker === path;
+  const today = new Date();
+
+  let view = state.datePickerView[path];
+  if (!view) {
+    if (isoValue) {
+      const [y, m] = isoValue.split("-").map(Number);
+      view = { year: y, month: m - 1 };
+    } else {
+      view = { year: Math.min(maxYear, Math.max(minYear, opts.defaultYear || today.getFullYear())), month: today.getMonth() };
+    }
+  }
+
+  const years = [];
+  for (let y = maxYear; y >= minYear; y--) years.push(y);
+
+  const firstDow = (new Date(view.year, view.month, 1).getDay() + 6) % 7; // Monday=0
+  const totalDays = daysInMonth(view.year, view.month);
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= totalDays; d++) cells.push(d);
+
+  return `
+    <div class="datefield">
+      <button type="button" class="date-toggle" data-action="toggleDatePicker" data-path="${esc(path)}" data-default-year="${opts.defaultYear || ""}">
+        <svg viewBox="0 0 24 24" width="16" height="16"><rect x="3" y="5" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" stroke-width="1.6"/></svg>
+        <span class="${isoValue ? "" : "placeholder"}">${isoValue ? formatDateDisplay(isoValue) : "dd/mm/aaaa"}</span>
+      </button>
+      ${
+        isOpen
+          ? `
+        <div class="date-overlay" data-action="closeDatePicker"></div>
+        <div class="date-popup">
+          <div class="date-popup-header">
+            <button type="button" class="date-nav-btn" data-action="dpPrevMonth" data-path="${esc(path)}">‹</button>
+            <select class="date-sel" data-action="dpSetMonth" data-path="${esc(path)}">
+              ${MONTH_NAMES.map((mn, i) => `<option value="${i}" ${i === view.month ? "selected" : ""}>${mn}</option>`).join("")}
+            </select>
+            <select class="date-sel" data-action="dpSetYear" data-path="${esc(path)}">
+              ${years.map((y) => `<option value="${y}" ${y === view.year ? "selected" : ""}>${y}</option>`).join("")}
+            </select>
+            <button type="button" class="date-nav-btn" data-action="dpNextMonth" data-path="${esc(path)}">›</button>
+          </div>
+          <div class="date-weekdays">${WEEKDAY_LETTERS.map((w) => `<span>${w}</span>`).join("")}</div>
+          <div class="date-grid">
+            ${cells
+              .map((d) => {
+                if (d == null) return `<span class="date-cell empty"></span>`;
+                const iso = isoFromYmd(view.year, view.month, d);
+                const isSelected = iso === isoValue;
+                const isToday = iso === isoFromYmd(today.getFullYear(), today.getMonth(), today.getDate());
+                return `<button type="button" class="date-cell${isSelected ? " selected" : ""}${isToday ? " today" : ""}" data-action="dpSelectDay" data-path="${esc(path)}" data-iso="${iso}">${d}</button>`;
+              })
+              .join("")}
+          </div>
+        </div>`
+          : ""
+      }
+    </div>`;
+}
 
 function setState(patch) {
   Object.assign(state, typeof patch === "function" ? patch(state) : patch);
@@ -128,14 +217,45 @@ function setProfile(patch) {
 
 const root = document.getElementById("root");
 
+function focusSelector(el) {
+  if (!el || !el.dataset) return null;
+  const d = el.dataset;
+  if (d.bind) return `[data-bind="${cssEsc(d.bind)}"]`;
+  if (d.action === "pbSeg") return `[data-action="pbSeg"][data-pb="${cssEsc(d.pb)}"][data-part="${cssEsc(d.part)}"]`;
+  if (d.action === "coachSetDayKm") return `[data-action="coachSetDayKm"][data-idx="${cssEsc(d.idx)}"]`;
+  if (d.action === "broadcastInput" || d.action === "athleteMessageInput") return `[data-action="${d.action}"]`;
+  return null;
+}
+function cssEsc(v) {
+  return String(v).replace(/["\\]/g, "\\$&");
+}
+
 function render() {
   document.documentElement.setAttribute("data-theme", state.theme);
+
+  const active = root.contains(document.activeElement) ? document.activeElement : null;
+  const sel = active ? focusSelector(active) : null;
+  const selStart = active && "selectionStart" in active ? active.selectionStart : null;
+  const selEnd = active && "selectionEnd" in active ? active.selectionEnd : null;
+
   let html = "";
   if (state.screen === "login") html = renderAuth();
   else if (state.screen === "onboarding") html = renderOnboarding();
   else if (state.screen === "compiling") html = renderCompiling();
   else if (state.screen === "app") html = renderApp();
   root.innerHTML = html;
+
+  if (sel) {
+    const next = root.querySelector(sel);
+    if (next) {
+      next.focus({ preventScroll: true });
+      if (selStart != null && "setSelectionRange" in next) {
+        try {
+          next.setSelectionRange(selStart, selEnd);
+        } catch (e) {}
+      }
+    }
+  }
   bindDynamicListeners();
 }
 
@@ -258,9 +378,8 @@ function renderOnboarding() {
     body = `
       <div class="ob-title">BIOMETRÍA</div>
       <div class="ob-label accent">FECHA DE NACIMIENTO (DATO CRÍTICO)</div>
-      <div class="ob-field-icon accent" style="margin-bottom:6px;">
-        <svg viewBox="0 0 24 24" width="16" height="16"><rect x="3" y="5" width="18" height="16" rx="2" fill="none" stroke="var(--accent)" stroke-width="1.6"/><line x1="3" y1="10" x2="21" y2="10" stroke="var(--accent)" stroke-width="1.6"/></svg>
-        <input type="date" data-bind="profile.birthdate" value="${esc(s.birthdate)}">
+      <div style="margin-bottom:6px;">
+        ${renderDatePicker("profile.birthdate", s.birthdate, { minYear: 1940, maxYear: new Date().getFullYear() - 5, defaultYear: 1995 })}
       </div>
       <div class="ob-hint">Con tu edad calculamos tu FC máxima (${fcMax} bpm) y así poder ajustar tus zonas.</div>
       <div class="ob-grid-2" style="margin-bottom:14px;">
@@ -300,7 +419,7 @@ function renderOnboarding() {
         </div>
         <div>
           <div class="ob-label">FECHA (OBLIGATORIA)</div>
-          <input class="ob-text accent" type="date" data-bind="profile.goalDate" value="${esc(s.goalDate)}">
+          ${renderDatePicker("profile.goalDate", s.goalDate, { minYear: new Date().getFullYear(), maxYear: new Date().getFullYear() + 3, defaultYear: new Date().getFullYear() })}
         </div>
       </div>
       ${goalMissing ? `<div class="ob-error">Completá el nombre del objetivo y la fecha para continuar — con esto armamos tu plan.</div>` : ""}`;
@@ -804,29 +923,11 @@ function renderToolsTab() {
       }`;
   }
 
-  const paceInput = state.toolConvPace;
-  const [pm, ps] = (paceInput || "").split(":").map(Number);
-  let convResult = "";
-  if (pm >= 0 && !isNaN(pm)) {
-    const paceMinPerKm = pm + (ps || 0) / 60;
-    if (paceMinPerKm > 0) {
-      const speedKmh = 60 / paceMinPerKm;
-      const paceMinPerMile = paceMinPerKm * 1.60934;
-      const mileM = Math.floor(paceMinPerMile);
-      const mileS = Math.round((paceMinPerMile - mileM) * 60);
-      convResult = `
-        <div class="week-summary" style="margin-top:14px;">
-          <div><span class="label">Velocidad</span><div class="value">${speedKmh.toFixed(2)} km/h</div></div>
-          <div><span class="label">Ritmo por milla</span><div class="value">${mileM}:${String(mileS).padStart(2, "0")} /mi</div></div>
-        </div>`;
-    }
-  }
-
   return `
     <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Herramientas</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:22px;">Calculadoras para planificar tus entrenamientos.</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:22px;">Calculadora para planificar tus entrenamientos.</div>
 
-    <div class="perfil-panel" style="margin-bottom:20px;">
+    <div class="perfil-panel">
       <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} CALCULADORA DE RITMOS Y ZONAS (VDOT)</div>
       <div style="font-size:12.5px;color:var(--muted);margin-bottom:16px;">Ingresá una marca reciente (distancia + tiempo) para estimar tus ritmos de entrenamiento y zonas de FC.</div>
       <div class="ob-grid-2" style="margin-bottom:12px;">
@@ -845,13 +946,6 @@ function renderToolsTab() {
         <input class="ob-text" type="number" placeholder="S" data-bind="toolS" value="${esc(state.toolS)}">
       </div>
       ${calcResult}
-    </div>
-
-    <div class="perfil-panel">
-      <div class="perfil-panel-heading"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="8" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg> CONVERSOR DE RITMOS</div>
-      <div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">Ingresá tu ritmo en min:seg por km.</div>
-      <input class="ob-text" style="max-width:160px;" placeholder="Ej: 5:30" data-bind="toolConvPace" value="${esc(state.toolConvPace)}">
-      ${convResult}
     </div>`;
 }
 
@@ -866,7 +960,6 @@ function renderPerfil() {
     { key: "fcRest", label: "FC REPOSO", value: s.fcRest },
     { key: null, label: "FC MÁXIMA (211−0,64×edad)", value: fcMax, disabled: true },
     { key: "gender", label: "SEXO", value: s.gender },
-    { key: "birthdate", label: "NACIMIENTO", value: s.birthdate, type: "date" },
   ];
   const pbDefs = [
     { key: "walk", label: "RECORD CAMINANDO" },
@@ -921,10 +1014,14 @@ function renderPerfil() {
               (f) => `
             <div class="bio-field">
               <div class="b-label">${f.label}</div>
-              <input type="${f.type || "text"}" value="${esc(String(f.value ?? ""))}" ${f.disabled ? "disabled style='opacity:0.7'" : `data-bind="profile.${f.key}"`}>
+              <input type="text" value="${esc(String(f.value ?? ""))}" ${f.disabled ? "disabled style='opacity:0.7'" : `data-bind="profile.${f.key}"`}>
             </div>`
             )
             .join("")}
+          <div class="bio-field">
+            <div class="b-label">NACIMIENTO</div>
+            ${renderDatePicker("profile.birthdate", s.birthdate, { minYear: 1940, maxYear: new Date().getFullYear() - 5, defaultYear: 1995 })}
+          </div>
         </div>
       </div>
       <div class="perfil-panel">
@@ -933,6 +1030,10 @@ function renderPerfil() {
           ${pbDefs.map((f) => `<div class="pb-row">${pbFieldHtml(f, s, false)}</div>`).join("")}
         </div>
       </div>
+    </div>
+
+    <div style="margin-top:32px;">
+      <button class="btn-outline-block" style="max-width:220px;" data-action="logout">Cerrar sesión</button>
     </div>`;
 }
 
@@ -1171,6 +1272,22 @@ function bindDynamicListeners() {
       saveAccounts(accounts);
     });
   });
+  root.querySelectorAll('[data-action="dpSetMonth"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      const path = el.dataset.path;
+      const view = state.datePickerView[path] || { year: new Date().getFullYear(), month: 0 };
+      state.datePickerView = { ...state.datePickerView, [path]: { ...view, month: parseInt(el.value, 10) } };
+      render();
+    });
+  });
+  root.querySelectorAll('[data-action="dpSetYear"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      const path = el.dataset.path;
+      const view = state.datePickerView[path] || { year: new Date().getFullYear(), month: 0 };
+      state.datePickerView = { ...state.datePickerView, [path]: { ...view, year: parseInt(el.value, 10) } };
+      render();
+    });
+  });
   root.querySelectorAll('[data-action="coachSetDayType"]').forEach((el) => {
     el.addEventListener("change", () => {
       coachSetDay(parseInt(el.dataset.idx, 10), el.value, parseFloat(el.dataset.km) || 0);
@@ -1361,7 +1478,57 @@ const ACTIONS = {
   },
   openAthlete: (el) => setState({ coachView: "detail", selectedAthleteEmail: el.dataset.email }),
   backToRoster: () => setState({ coachView: "roster", selectedAthleteEmail: null }),
+
+  toggleDatePicker: (el) => {
+    const path = el.dataset.path;
+    if (state.openDatePicker === path) {
+      setState({ openDatePicker: null });
+      return;
+    }
+    if (!state.datePickerView[path]) {
+      const current = getByPath(state, path);
+      const defaultYear = parseInt(el.dataset.defaultYear, 10) || new Date().getFullYear();
+      let view;
+      if (current) {
+        const [y, m] = current.split("-").map(Number);
+        view = { year: y, month: m - 1 };
+      } else {
+        view = { year: defaultYear, month: 0 };
+      }
+      state.datePickerView = { ...state.datePickerView, [path]: view };
+    }
+    setState({ openDatePicker: path });
+  },
+  closeDatePicker: () => setState({ openDatePicker: null }),
+  dpPrevMonth: (el) => shiftDatePickerMonth(el.dataset.path, -1),
+  dpNextMonth: (el) => shiftDatePickerMonth(el.dataset.path, 1),
+  dpSelectDay: (el) => {
+    const path = el.dataset.path;
+    setByPath(state, path, el.dataset.iso);
+    state.openDatePicker = null;
+    render();
+    persistCurrentProfile();
+  },
 };
+
+function shiftDatePickerMonth(path, delta) {
+  const view = state.datePickerView[path] || { year: new Date().getFullYear(), month: 0 };
+  let month = view.month + delta;
+  let year = view.year;
+  if (month < 0) {
+    month = 11;
+    year--;
+  } else if (month > 11) {
+    month = 0;
+    year++;
+  }
+  state.datePickerView = { ...state.datePickerView, [path]: { year, month } };
+  render();
+}
+
+function getByPath(obj, path) {
+  return path.split(".").reduce((cur, key) => (cur == null ? cur : cur[key]), obj);
+}
 
 function quickSocialLogin(name, email) {
   const accounts = loadAccounts();
