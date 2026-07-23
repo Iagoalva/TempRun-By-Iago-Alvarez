@@ -8,22 +8,43 @@ const ICONS = {
   perfil: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 20c0-3.6 3.2-6 8-6s8 2.4 8 6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`,
   lightning: `<svg viewBox="0 0 24 24" width="19" height="19"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="var(--accent)"/></svg>`,
   chat: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 5h16v11H9l-4 4V5z" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
+  chatNav: `<svg viewBox="0 0 24 24" width="17" height="17"><path d="M4 5h16v11H9l-4 4V5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
   weather: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="4" fill="var(--warn)"/><g stroke="var(--warn)" stroke-width="1.6"><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></g></svg>`,
   moon: `<svg viewBox="0 0 24 24" width="15" height="15"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z" fill="currentColor"/></svg>`,
   sun: `<svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6"><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></g></svg>`,
   strava: `<svg viewBox="0 0 24 24" width="18" height="18"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="var(--accent)"/></svg>`,
   person: `<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="8" r="3.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M4 20c0-3.6 3.2-6 8-6s8 2.4 8 6" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>`,
   phone: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 3h3l2 5-2.5 1.5a12 12 0 0 0 5 5L15 12l5 2v3c0 1.1-.9 2-2 2C10.6 19 5 13.4 5 6c0-1.1.9-2 2-2z" fill="none" stroke="var(--muted)" stroke-width="1.4" stroke-linejoin="round"/></svg>`,
+  people: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="9" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 20c0-2.2 1-4 3.5-4.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`,
 };
 
 const ACCOUNTS_KEY = "temprun_accounts";
 const SESSION_KEY = "temprun_session";
+const COACH_EMAIL = "coach@temprun.club";
+const COACH_PASSWORD = "TempRun2026";
+const GROUP_LABELS = { "5k": "5K", "10k": "10K", "21k": "21K", "42k": "42K" };
+const PLAN_TYPE_OPTIONS = [
+  ["rest", "Descanso"],
+  ["easy", "Rodaje suave"],
+  ["fartlek", "Fartlek"],
+  ["series", "Series"],
+  ["ritmo", "Ritmo de carrera"],
+  ["long", "Fondo largo"],
+  ["caco", "CACO (caminar-correr)"],
+];
 
 function loadAccounts() {
   return JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || "{}");
 }
 function saveAccounts(accounts) {
   localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+}
+function ensureCoachAccount() {
+  const accounts = loadAccounts();
+  if (!accounts[COACH_EMAIL]) {
+    accounts[COACH_EMAIL] = { password: COACH_PASSWORD, role: "coach", profile: null };
+    saveAccounts(accounts);
+  }
 }
 
 function defaultProfileState() {
@@ -66,9 +87,14 @@ let state = {
   signupEmail: "",
   signupPassword: "",
   loginError: "",
+  recoverStep: "email", // email | reset | done
   recoverEmail: "",
-  recoverSubmitted: false,
+  recoverFoundEmail: "",
+  recoverPassword1: "",
+  recoverPassword2: "",
+  recoverError: "",
   currentEmail: null,
+  role: "athlete",
   onboardingStep: 1,
   compileStep: 0,
   theme: "dark",
@@ -78,6 +104,17 @@ let state = {
   selectedDayIdx: null,
   chatInput: "",
   profile: defaultProfileState(),
+  // coach-only
+  coachView: "roster", // roster | detail
+  selectedAthleteEmail: null,
+  coachBroadcast: "",
+  // herramientas calculators (local, not persisted)
+  toolDistance: "5000",
+  toolCustomKm: "",
+  toolH: "",
+  toolM: "",
+  toolS: "",
+  toolConvPace: "",
 };
 
 function setState(patch) {
@@ -149,26 +186,35 @@ function renderAuth() {
 }
 
 function renderRecover() {
+  let body = "";
+  if (state.recoverStep === "email") {
+    body = `
+      <div class="auth-title">Recuperar contraseña</div>
+      <div class="auth-subtitle">Ingresá el email de tu cuenta para restablecer la contraseña.</div>
+      ${state.recoverError ? `<div class="auth-error">${state.recoverError}</div>` : ""}
+      <input class="field-input" type="email" placeholder="Email" data-bind="recoverEmail" value="${esc(state.recoverEmail)}">
+      <button class="btn-accent" data-action="checkRecoverEmail">Continuar</button>`;
+  } else if (state.recoverStep === "reset") {
+    body = `
+      <div class="auth-title">Elegí una nueva contraseña</div>
+      <div class="auth-subtitle">Cuenta: <strong style="color:var(--text)">${esc(state.recoverFoundEmail)}</strong></div>
+      ${state.recoverError ? `<div class="auth-error">${state.recoverError}</div>` : ""}
+      <input class="field-input" type="password" placeholder="Nueva contraseña (mínimo 4 caracteres)" data-bind="recoverPassword1" value="${esc(state.recoverPassword1)}">
+      <input class="field-input" type="password" placeholder="Repetir contraseña" data-bind="recoverPassword2" value="${esc(state.recoverPassword2)}">
+      <button class="btn-accent" data-action="submitReset">Guardar nueva contraseña</button>`;
+  } else {
+    body = `
+      <div style="width:52px;height:52px;border-radius:50%;background:color-mix(in oklch, var(--good) 18%, transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M20 6 9 17l-5-5" fill="none" stroke="var(--good)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="auth-title">¡Contraseña actualizada!</div>
+      <div class="auth-subtitle">Ya podés ingresar con tu nueva contraseña.</div>`;
+  }
   return `
   <div class="auth-screen">
     <div class="auth-card">
       <div class="auth-logo">${ICONS.logo}<div>TEMPRUN</div></div>
-      ${
-        !state.recoverSubmitted
-          ? `
-        <div class="auth-title">Recuperar contraseña</div>
-        <div class="auth-subtitle">Ingresá tu email y te enviamos un enlace para restablecerla.</div>
-        <input class="field-input" type="email" placeholder="Email" data-bind="recoverEmail" value="${esc(state.recoverEmail)}">
-        <button class="btn-accent" data-action="sendRecover">Enviar enlace</button>
-      `
-          : `
-        <div style="width:52px;height:52px;border-radius:50%;background:color-mix(in oklch, var(--good) 18%, transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
-          <svg viewBox="0 0 24 24" width="24" height="24"><path d="M20 6 9 17l-5-5" fill="none" stroke="var(--good)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-        <div class="auth-title">Listo, revisá tu correo</div>
-        <div class="auth-subtitle">Te enviamos un enlace a <strong style="color:var(--text)">${esc(state.recoverEmail)}</strong> para restablecer tu contraseña.</div>
-      `
-      }
+      ${body}
       <button class="link-btn" data-action="backToLogin">‹ Volver a ingresar</button>
     </div>
   </div>`;
@@ -364,8 +410,10 @@ function renderCompiling() {
 
 /* ---------------- APP SHELL ---------------- */
 
-function computeRenderModel() {
-  const s = state.profile;
+function computeRenderModel(profile, weekIndexParam) {
+  const s = profile || state.profile;
+  const isOwn = s === state.profile;
+  const weekIndexRaw = weekIndexParam != null ? weekIndexParam : isOwn ? state.weekIndex : 0;
   const age = ageFromBirthdate(s.birthdate);
   const fcMax = fcMaxFromAge(age);
   const fcRest = parseFloat(s.fcRest) || 60;
@@ -374,7 +422,7 @@ function computeRenderModel() {
   const vdot = computeVdot(s.pbs, level);
   const paces = computePaces(vdot);
   const macro = buildMacrocycle(s, paces, level);
-  const weekIndex = Math.max(0, Math.min(macro.totalWeeks - 1, state.weekIndex));
+  const weekIndex = Math.max(0, Math.min(macro.totalWeeks - 1, weekIndexRaw));
   const weekMeta = macro.weeks[weekIndex];
 
   const rawDaysBase = buildWeekDays(weekMeta, s.availability, paces, level, distInfo);
@@ -388,10 +436,10 @@ function computeRenderModel() {
     const done = !!s.completed[key];
     const isRest = d.type === "rest";
     const barColor = d.type === "hard" ? "var(--bad)" : d.type === "long" ? "var(--accent)" : isRest ? "var(--muted)" : "var(--good)";
-    const expanded = state.expandedKey === key;
+    const expanded = isOwn && state.expandedKey === key;
     const sessionInfoRaw = isRest ? null : sessionBlocks(d, fcRest, fcMax, paces, distInfo);
     const sessionInfo = sessionInfoRaw ? { ...sessionInfoRaw, phaseTag: weekMeta.phaseName.toUpperCase() + (weekMeta.isDeload ? " · DESCARGA" : "") } : null;
-    return { ...d, key, done, isRest, hasSession: !isRest, barColor, expanded, sessionInfo };
+    return { ...d, key, i, done, isRest, hasSession: !isRest, barColor, expanded, sessionInfo, typeKey: reverseTypeKey(d) };
   });
 
   const totalKm = rawDays.reduce((sum, d) => sum + d.km, 0);
@@ -400,7 +448,7 @@ function computeRenderModel() {
 
   const dayKeyByJs = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
   const todayKey = dayKeyByJs[new Date().getDay()];
-  let selIdx = state.selectedDayIdx;
+  let selIdx = isOwn ? state.selectedDayIdx : null;
   if (selIdx == null || selIdx < 0 || selIdx > 6) {
     const foundToday = planDays.findIndex((d) => d.day === todayKey);
     selIdx = foundToday >= 0 ? foundToday : planDays.findIndex((d) => d.hasSession);
@@ -426,9 +474,20 @@ function computeRenderModel() {
     index: w.index,
   }));
 
+  const factors = [0.85, 1.0, 1.1, 0.65];
+  const labels = ["Sem 1", "Sem 2", "Sem 3", "Sem 4 (descarga)"];
+  const monthVols = factors.map((f) => Math.round(totalKm * f));
+  const monthMax = Math.max(...monthVols, 1);
+  const monthWeeks = monthVols.map((km, i) => ({
+    km,
+    label: labels[i],
+    barHeight: Math.max(6, Math.round((km / monthMax) * 70)),
+    color: i === 3 ? "var(--warn)" : "var(--accent)",
+  }));
+
   return {
     level, vdot, paces, macro, weekIndex, weekMeta, planDays, todayDay, todayHeading,
-    totalKm, doneKm, pct, acwrStatus, weeksMeta, fcMax, fcRest, distInfo,
+    totalKm, doneKm, pct, acwrStatus, weeksMeta, fcMax, fcRest, distInfo, monthWeeks,
     phaseLabelShort: `${distInfo.label} · ${level} · Sem ${weekIndex + 1}/${macro.totalWeeks}`,
     phaseLabelFull: `${weekMeta.phaseName}${weekMeta.isDeload ? " · Descarga" : ""} · Semana ${weekIndex + 1}/${macro.totalWeeks} · ${level}`,
     goalLine: s.goalName ? `${s.goalName} · ${distInfo.label}` : `Objetivo: ${distInfo.label}`,
@@ -436,6 +495,7 @@ function computeRenderModel() {
 }
 
 function renderApp() {
+  if (state.role === "coach") return renderCoachApp();
   const m = computeRenderModel();
   const s = state.profile;
   const firstName = (s.fullName || "Atleta").split(" ")[0];
@@ -444,7 +504,8 @@ function renderApp() {
   const navItems = [
     { key: "panel", icon: ICONS.panel, label: "Panel" },
     { key: "plan", icon: ICONS.plan, label: "Plan" },
-    { key: "chat", icon: ICONS.tools, label: "Herramientas" },
+    { key: "chat", icon: ICONS.chatNav, label: "Chat" },
+    { key: "tools", icon: ICONS.tools, label: "Herramientas" },
     { key: "perfil", icon: ICONS.perfil, label: "Perfil" },
   ];
 
@@ -475,7 +536,8 @@ function renderApp() {
       <div class="content-inner">
         ${state.athleteTab === "panel" ? renderPanel(m, firstName, avatarLetter) : ""}
         ${state.athleteTab === "plan" ? renderPlan(m) : ""}
-        ${state.athleteTab === "chat" ? renderHerramientas() : ""}
+        ${state.athleteTab === "chat" ? renderChatTab() : ""}
+        ${state.athleteTab === "tools" ? renderToolsTab() : ""}
         ${state.athleteTab === "perfil" ? renderPerfil() : ""}
       </div>
     </main>
@@ -487,7 +549,9 @@ function renderApp() {
 }
 
 function renderPanel(m, firstName, avatarLetter) {
-  const coachMsg = m.weekMeta.isDeload
+  const coachMsg = state.profile.coachMessage && state.profile.coachMessage.trim()
+    ? state.profile.coachMessage
+    : m.weekMeta.isDeload
     ? "Esta semana bajamos volumen a propósito — es momento de recuperar y absorber la carga."
     : "Vamos bien esta semana. Metele fuerte a las sesiones de calidad y avisame cómo te sentís.";
 
@@ -671,10 +735,10 @@ function renderPlan(m) {
     </div>`;
 }
 
-function renderHerramientas() {
+function renderChatTab() {
   const s = state.profile;
   return `
-    <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Herramientas</div>
+    <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Chat con Iago</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:18px;">Chat directo con tu coach.</div>
     <div class="chat-box">
       ${s.chatMessages
@@ -692,6 +756,102 @@ function renderHerramientas() {
     <div class="chat-input-row">
       <input placeholder="Escribí un mensaje..." data-bind="chatInput" value="${esc(state.chatInput)}" data-enter-action="sendMessage">
       <button class="chat-send-btn" data-action="sendMessage">Enviar</button>
+    </div>`;
+}
+
+function renderToolsTab() {
+  const distOptions = [
+    ["1500", "1500 m"],
+    ["3000", "3000 m"],
+    ["5000", "5000 m (5K)"],
+    ["10000", "10000 m (10K)"],
+    ["21097", "21097 m (21K)"],
+    ["42195", "42195 m (42K)"],
+    ["custom", "Otra distancia (km)"],
+  ];
+  const distM = state.toolDistance === "custom" ? (parseFloat(state.toolCustomKm) || 0) * 1000 : parseFloat(state.toolDistance);
+  const h = parseInt(state.toolH, 10) || 0;
+  const mnt = parseInt(state.toolM, 10) || 0;
+  const sec = parseInt(state.toolS, 10) || 0;
+  const timeSec = h * 3600 + mnt * 60 + sec;
+  let calcResult = "";
+  if (distM > 0 && timeSec > 0) {
+    const vdot = vdotFromPerf(distM, timeSec);
+    const paces = computePaces(vdot);
+    const s = state.profile;
+    const age = ageFromBirthdate(s.birthdate);
+    const fcMax = fcMaxFromAge(age);
+    const fcRest = parseFloat(s.fcRest) || 60;
+    const hasFc = !!s.birthdate || !!s.fcRest;
+    calcResult = `
+      <div class="week-summary" style="margin-top:18px;">
+        <div><span class="label">VDOT estimado</span><div class="value">${Math.round(vdot)}</div></div>
+        <div><span class="label">Ritmo suave</span><div class="value">${paces.easy} /km</div></div>
+        <div><span class="label">Ritmo maratón</span><div class="value">${paces.marathon} /km</div></div>
+        <div><span class="label">Ritmo umbral</span><div class="value">${paces.threshold} /km</div></div>
+        <div><span class="label">Ritmo intervalo</span><div class="value">${paces.interval} /km</div></div>
+        <div><span class="label">Ritmo repetición</span><div class="value">${paces.repetition} /km</div></div>
+      </div>
+      ${
+        hasFc
+          ? `<div class="week-summary" style="margin-top:10px;">
+              <div><span class="label">Z1 recuperación</span><div class="value">${karvonen(0.5, 0.6, fcRest, fcMax)}</div></div>
+              <div><span class="label">Z2 aeróbico</span><div class="value">${karvonen(0.6, 0.75, fcRest, fcMax)}</div></div>
+              <div><span class="label">Z3 tempo</span><div class="value">${karvonen(0.75, 0.85, fcRest, fcMax)}</div></div>
+              <div><span class="label">Z4 umbral</span><div class="value">${karvonen(0.85, 0.95, fcRest, fcMax)}</div></div>
+            </div>`
+          : `<div style="font-size:12px;color:var(--muted);margin-top:10px;">Completá tu FC en reposo y fecha de nacimiento en Perfil para ver también tus zonas de frecuencia cardíaca.</div>`
+      }`;
+  }
+
+  const paceInput = state.toolConvPace;
+  const [pm, ps] = (paceInput || "").split(":").map(Number);
+  let convResult = "";
+  if (pm >= 0 && !isNaN(pm)) {
+    const paceMinPerKm = pm + (ps || 0) / 60;
+    if (paceMinPerKm > 0) {
+      const speedKmh = 60 / paceMinPerKm;
+      const paceMinPerMile = paceMinPerKm * 1.60934;
+      const mileM = Math.floor(paceMinPerMile);
+      const mileS = Math.round((paceMinPerMile - mileM) * 60);
+      convResult = `
+        <div class="week-summary" style="margin-top:14px;">
+          <div><span class="label">Velocidad</span><div class="value">${speedKmh.toFixed(2)} km/h</div></div>
+          <div><span class="label">Ritmo por milla</span><div class="value">${mileM}:${String(mileS).padStart(2, "0")} /mi</div></div>
+        </div>`;
+    }
+  }
+
+  return `
+    <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Herramientas</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:22px;">Calculadoras para planificar tus entrenamientos.</div>
+
+    <div class="perfil-panel" style="margin-bottom:20px;">
+      <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} CALCULADORA DE RITMOS Y ZONAS (VDOT)</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:16px;">Ingresá una marca reciente (distancia + tiempo) para estimar tus ritmos de entrenamiento y zonas de FC.</div>
+      <div class="ob-grid-2" style="margin-bottom:12px;">
+        <div>
+          <div class="ob-label">DISTANCIA</div>
+          <select class="ob-select" data-bind="toolDistance">
+            ${distOptions.map(([v, l]) => `<option value="${v}" ${state.toolDistance === v ? "selected" : ""}>${l}</option>`).join("")}
+          </select>
+        </div>
+        ${state.toolDistance === "custom" ? `<div><div class="ob-label">KM</div><input class="ob-text" type="number" data-bind="toolCustomKm" value="${esc(state.toolCustomKm)}"></div>` : `<div></div>`}
+      </div>
+      <div class="ob-label">TIEMPO (H : M : S)</div>
+      <div style="display:flex;gap:8px;align-items:center;max-width:260px;">
+        <input class="ob-text" type="number" placeholder="H" data-bind="toolH" value="${esc(state.toolH)}">
+        <input class="ob-text" type="number" placeholder="M" data-bind="toolM" value="${esc(state.toolM)}">
+        <input class="ob-text" type="number" placeholder="S" data-bind="toolS" value="${esc(state.toolS)}">
+      </div>
+      ${calcResult}
+    </div>
+
+    <div class="perfil-panel">
+      <div class="perfil-panel-heading"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="8" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg> CONVERSOR DE RITMOS</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">Ingresá tu ritmo en min:seg por km.</div>
+      <input class="ob-text" style="max-width:160px;" placeholder="Ej: 5:30" data-bind="toolConvPace" value="${esc(state.toolConvPace)}">
+      ${convResult}
     </div>`;
 }
 
@@ -776,6 +936,187 @@ function renderPerfil() {
     </div>`;
 }
 
+/* ---------------- COACH APP ---------------- */
+
+function getAllAthleteAccounts() {
+  const accounts = loadAccounts();
+  return Object.entries(accounts)
+    .filter(([email, acc]) => acc.role !== "coach" && acc.profile && acc.profile.onboardingDone)
+    .map(([email, acc]) => ({ email, acc }));
+}
+
+function renderCoachApp() {
+  return `
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div class="sidebar-brand">
+        ${ICONS.logo}
+        <div>
+          <div class="brand-title">TEMPRUN</div>
+          <div class="brand-sub">PANEL COACH</div>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="active">${ICONS.people}<span class="nav-label">Panel de atletas</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="footer-label">TEMA</div>
+        <div class="theme-toggle-row">
+          <button class="${state.theme === "dark" ? "active" : ""}" data-action="setTheme" data-theme="dark">${ICONS.moon} Oscuro</button>
+          <button class="${state.theme === "light" ? "active" : ""}" data-action="setTheme" data-theme="light">${ICONS.sun} Claro</button>
+        </div>
+        <button class="logout-link" data-action="logout">Cerrar sesión</button>
+      </div>
+    </aside>
+    <main class="app-content">
+      <div class="content-inner">
+        ${state.coachView === "detail" && state.selectedAthleteEmail ? renderCoachDetail() : renderCoachRoster()}
+      </div>
+    </main>
+  </div>`;
+}
+
+function renderCoachRoster() {
+  const athletes = getAllAthleteAccounts().map(({ email, acc }) => {
+    const m = computeRenderModel(acc.profile, 0);
+    const isBad = m.acwrStatus.color === "var(--bad)" && !m.weekMeta.isDeload;
+    return {
+      email,
+      name: acc.profile.fullName || email,
+      groupLabel: m.distInfo.label,
+      level: m.level,
+      adherence: m.pct,
+      loadLabel: m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label,
+      loadColor: m.weekMeta.isDeload ? "var(--warn)" : m.acwrStatus.color,
+      alert: isBad,
+      sync: acc.profile.stravaStatus === "connected" ? "Strava" : "—",
+    };
+  });
+
+  const avgAdherence = athletes.length ? Math.round(athletes.reduce((sum, a) => sum + a.adherence, 0) / athletes.length) : 0;
+  const alertsCount = athletes.filter((a) => a.alert).length;
+
+  return `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;">
+      <div>
+        <div style="margin-bottom:6px;font-size:26px;font-weight:800;">Panel de atletas</div>
+        <div style="font-size:13.5px;color:var(--muted);">Vista general de tu equipo</div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.4px;margin-bottom:8px;">MENSAJE GENERAL (se muestra a atletas sin mensaje personalizado)</div>
+      <textarea id="coach-broadcast" style="width:100%;min-height:70px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;resize:vertical;" data-action="broadcastInput">${esc(state.coachBroadcast)}</textarea>
+    </div>
+
+    ${
+      athletes.length === 0
+        ? `<div style="background:var(--surface);border:1px dashed var(--border);border-radius:14px;padding:60px 20px;text-align:center;">
+             <div style="font-size:17px;font-weight:800;margin-bottom:8px;">Todavía no hay atletas</div>
+             <div style="font-size:13.5px;color:var(--muted);">Cuando un alumno se registre y termine el onboarding, va a aparecer acá.</div>
+           </div>`
+        : `
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:26px;">
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">ATLETAS ACTIVOS</div>
+            <div style="font-size:22px;font-weight:800;margin-top:8px;">${athletes.length}</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">ALERTAS</div>
+            <div style="font-size:22px;font-weight:800;margin-top:8px;color:var(--bad);">${alertsCount}</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
+            <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">ADHERENCIA PROMEDIO</div>
+            <div style="font-size:22px;font-weight:800;margin-top:8px;">${avgAdherence}%</div>
+          </div>
+        </div>
+
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+          <div style="display:flex;gap:10px;padding:12px 18px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.3px;">
+            <div style="flex:2;">ATLETA</div>
+            <div style="flex:1;">OBJETIVO</div>
+            <div style="flex:1;">NIVEL</div>
+            <div style="flex:1;">ADHERENCIA</div>
+            <div style="flex:1.4;">CARGA</div>
+          </div>
+          ${athletes
+            .map(
+              (a) => `
+            <div data-action="openAthlete" data-email="${esc(a.email)}" style="display:flex;align-items:center;padding:13px 18px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;">
+              <div style="flex:2;font-weight:700;display:flex;align-items:center;gap:8px;">${esc(a.name)}${a.alert ? `<span title="Riesgo" style="width:8px;height:8px;border-radius:50%;background:var(--bad);display:inline-block;"></span>` : ""}</div>
+              <div style="flex:1;color:var(--muted);">${a.groupLabel}</div>
+              <div style="flex:1;color:var(--muted);">${a.level}</div>
+              <div style="flex:1;font-weight:700;">${a.adherence}%</div>
+              <div style="flex:1.4;"><span style="font-size:11.5px;font-weight:700;color:${a.loadColor};background:color-mix(in oklch, ${a.loadColor} 18%, transparent);padding:4px 10px;border-radius:12px;">${a.loadLabel}</span></div>
+            </div>`
+            )
+            .join("")}
+        </div>`
+    }`;
+}
+
+function renderCoachDetail() {
+  const accounts = loadAccounts();
+  const acc = accounts[state.selectedAthleteEmail];
+  if (!acc) return renderCoachRoster();
+  const profile = acc.profile;
+  const m = computeRenderModel(profile, 0);
+  const editableDays = m.planDays.map((d) => ({
+    ...d,
+    kmDisplay: d.type === "rest" ? 0 : d.km,
+  }));
+
+  return `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;">
+      <button data-action="backToRoster" style="all:unset;cursor:pointer;width:34px;height:34px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;line-height:32px;">‹</button>
+      <div>
+        <div style="font-size:24px;font-weight:800;">${esc(profile.fullName || state.selectedAthleteEmail)}</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${m.distInfo.label} · ${m.level} · ${m.pct}% adherencia · ${m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label}</div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.4px;margin-bottom:8px;">MENSAJE PERSONALIZADO PARA ${esc((profile.fullName || "").split(" ")[0].toUpperCase())}</div>
+      <textarea data-action="athleteMessageInput" style="width:100%;min-height:70px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;resize:vertical;" placeholder="Escribí un mensaje solo para este atleta...">${esc(profile.coachMessage || "")}</textarea>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
+      <div style="font-size:15px;font-weight:800;margin-bottom:4px;">Editar plan de la semana</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">Ajustá el tipo de sesión y los km de cada día si hace falta.</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${editableDays
+          .map(
+            (d) => `
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:40px;font-size:12px;font-weight:700;color:var(--muted);">${d.day}</div>
+            <select data-action="coachSetDayType" data-idx="${d.i}" data-km="${d.kmDisplay}" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:600;">
+              ${PLAN_TYPE_OPTIONS.map(([v, l]) => `<option value="${v}" ${d.typeKey === v ? "selected" : ""}>${l}</option>`).join("")}
+            </select>
+            <input type="number" data-action="coachSetDayKm" data-idx="${d.i}" data-typekey="${d.typeKey}" value="${d.kmDisplay}" style="width:80px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:700;">
+            <span style="font-size:11px;color:var(--muted);width:26px;">km</span>
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;">
+      <div style="font-size:15px;font-weight:800;margin-bottom:14px;">Planificación mensual (estimada)</div>
+      <div style="display:flex;align-items:flex-end;gap:10px;height:90px;">
+        ${m.monthWeeks
+          .map(
+            (w) => `
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;">
+            <div style="font-size:11px;font-weight:700;">${w.km}km</div>
+            <div style="width:100%;border-radius:5px 5px 0 0;background:${w.color};height:${w.barHeight}px;"></div>
+            <div style="font-size:10px;color:var(--muted);">${w.label}</div>
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>`;
+}
+
 function esc(str) {
   return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -795,7 +1136,7 @@ function bindDynamicListeners() {
     const evt = el.tagName === "SELECT" || el.type === "date" ? "change" : "input";
     el.addEventListener(evt, () => {
       setByPath(state, path, el.value);
-      if (path.startsWith("profile.")) render();
+      if (path.startsWith("profile.") || path.startsWith("tool")) render();
     });
     if (el.hasAttribute("data-enter-action")) {
       el.addEventListener("keydown", (e) => {
@@ -803,6 +1144,66 @@ function bindDynamicListeners() {
       });
     }
   });
+  root.querySelectorAll('[data-action="pbSeg"]').forEach((el) => {
+    el.addEventListener("input", () => {
+      const key = el.dataset.pb,
+        part = el.dataset.part;
+      const digits = el.value.replace(/\D/g, "").slice(0, 2);
+      setProfile((p) => {
+        const cur = pbParts(p.pbs[key] === "NONE" ? "" : p.pbs[key]);
+        cur[part] = digits;
+        return { pbs: { ...p.pbs, [key]: `${cur.h || "0"}:${cur.m || "00"}:${cur.s || "00"}` } };
+      });
+    });
+  });
+  root.querySelectorAll('[data-action="broadcastInput"]').forEach((el) => {
+    el.addEventListener("input", () => {
+      state.coachBroadcast = el.value;
+      applyCoachBroadcast();
+    });
+  });
+  root.querySelectorAll('[data-action="athleteMessageInput"]').forEach((el) => {
+    el.addEventListener("input", () => {
+      const accounts = loadAccounts();
+      const acc = accounts[state.selectedAthleteEmail];
+      if (!acc) return;
+      acc.profile.coachMessage = el.value;
+      saveAccounts(accounts);
+    });
+  });
+  root.querySelectorAll('[data-action="coachSetDayType"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      coachSetDay(parseInt(el.dataset.idx, 10), el.value, parseFloat(el.dataset.km) || 0);
+    });
+  });
+  root.querySelectorAll('[data-action="coachSetDayKm"]').forEach((el) => {
+    el.addEventListener("input", () => {
+      coachSetDay(parseInt(el.dataset.idx, 10), el.dataset.typekey, parseFloat(el.value) || 0);
+    });
+  });
+}
+
+function coachSetDay(idx, typeKey, km) {
+  const accounts = loadAccounts();
+  const acc = accounts[state.selectedAthleteEmail];
+  if (!acc) return;
+  const cfg = SESSION_TYPES[typeKey];
+  const finalKm = cfg.type === "rest" ? 0 : km || 8;
+  const key = "0-" + idx;
+  acc.profile.dayOverrides[key] = { ...cfg, km: finalKm, dist: cfg.type === "rest" ? "—" : finalKm + " km" };
+  saveAccounts(accounts);
+  render();
+}
+
+function applyCoachBroadcast() {
+  const accounts = loadAccounts();
+  Object.entries(accounts).forEach(([email, acc]) => {
+    if (acc.role === "coach" || !acc.profile) return;
+    if (!acc.profile.coachMessage || acc.profile.coachMessage === state.coachBroadcastPrev) {
+      // only overwrite if it looked like a previous broadcast (avoid clobbering personalized msgs)
+    }
+  });
+  localStorage.setItem("temprun_coach_broadcast", state.coachBroadcast);
 }
 
 root.addEventListener("click", (e) => {
@@ -823,10 +1224,36 @@ const ACTIONS = {
   loginWithApple: () => quickSocialLogin("Juan Pérez", "apple-user@temprun.demo"),
   goSignup: () => setState({ loginScreen: "signup", loginError: "" }),
   goSignin: () => setState({ loginScreen: "signin", loginError: "" }),
-  goRecover: () => setState({ loginScreen: "recover", recoverSubmitted: false, recoverEmail: state.loginEmail }),
-  backToLogin: () => setState({ loginScreen: "signin", recoverSubmitted: false }),
-  sendRecover: () => {
-    if (state.recoverEmail.trim()) setState({ recoverSubmitted: true });
+  goRecover: () =>
+    setState({ loginScreen: "recover", recoverStep: "email", recoverEmail: state.loginEmail, recoverError: "", recoverPassword1: "", recoverPassword2: "" }),
+  backToLogin: () => setState({ loginScreen: "signin" }),
+  checkRecoverEmail: () => {
+    const email = state.recoverEmail.trim().toLowerCase();
+    const accounts = loadAccounts();
+    if (!email || !accounts[email]) {
+      setState({ recoverError: "No existe ninguna cuenta con ese email." });
+      return;
+    }
+    setState({ recoverStep: "reset", recoverFoundEmail: email, recoverError: "" });
+  },
+  submitReset: () => {
+    if (state.recoverPassword1.length < 4) {
+      setState({ recoverError: "La contraseña debe tener al menos 4 caracteres." });
+      return;
+    }
+    if (state.recoverPassword1 !== state.recoverPassword2) {
+      setState({ recoverError: "Las contraseñas no coinciden." });
+      return;
+    }
+    const accounts = loadAccounts();
+    const acc = accounts[state.recoverFoundEmail];
+    if (!acc) {
+      setState({ recoverError: "No existe ninguna cuenta con ese email." });
+      return;
+    }
+    acc.password = state.recoverPassword1;
+    saveAccounts(accounts);
+    setState({ recoverStep: "done", recoverError: "" });
   },
   doLogin: () => {
     const email = state.loginEmail.trim().toLowerCase();
@@ -855,7 +1282,7 @@ const ACTIONS = {
     }
     const profile = defaultProfileState();
     profile.fullName = state.signupName.trim();
-    const acc = { password: state.signupPassword, profile };
+    const acc = { password: state.signupPassword, role: "athlete", profile };
     accounts[email] = acc;
     saveAccounts(accounts);
     enterAccount(email, acc);
@@ -871,6 +1298,9 @@ const ACTIONS = {
       signupPassword: "",
       loginError: "",
       currentEmail: null,
+      role: "athlete",
+      coachView: "roster",
+      selectedAthleteEmail: null,
     });
     localStorage.removeItem(SESSION_KEY);
   },
@@ -903,7 +1333,6 @@ const ACTIONS = {
     const key = el.dataset.pb;
     setProfile((p) => ({ pbs: { ...p.pbs, [key]: p.pbs[key] === "NONE" ? "" : "NONE" } }));
   },
-  pbSeg: null, // handled via input listener below (needs value), see bindDynamicListeners extension
   goTab: (el) => setState({ athleteTab: el.dataset.tab, selectedDayIdx: null, expandedKey: null }),
   setTheme: (el) => setState({ theme: el.dataset.theme }),
   pickDay: (el) => setState({ selectedDayIdx: parseInt(el.dataset.idx, 10) }),
@@ -930,24 +1359,8 @@ const ACTIONS = {
     setProfile((p) => ({ chatMessages: [...p.chatMessages, { from: "athlete", text: state.chatInput, time }] }));
     setState({ chatInput: "" });
   },
-};
-
-// pb segment inputs need custom binding since they compose h:m:s — patch bindDynamicListeners
-const originalBind = bindDynamicListeners;
-bindDynamicListeners = function () {
-  originalBind();
-  root.querySelectorAll('[data-action="pbSeg"]').forEach((el) => {
-    el.addEventListener("input", () => {
-      const key = el.dataset.pb,
-        part = el.dataset.part;
-      const digits = el.value.replace(/\D/g, "").slice(0, 2);
-      setProfile((p) => {
-        const cur = pbParts(p.pbs[key] === "NONE" ? "" : p.pbs[key]);
-        cur[part] = digits;
-        return { pbs: { ...p.pbs, [key]: `${cur.h || "0"}:${cur.m || "00"}:${cur.s || "00"}` } };
-      });
-    });
-  });
+  openAthlete: (el) => setState({ coachView: "detail", selectedAthleteEmail: el.dataset.email }),
+  backToRoster: () => setState({ coachView: "roster", selectedAthleteEmail: null }),
 };
 
 function quickSocialLogin(name, email) {
@@ -956,7 +1369,7 @@ function quickSocialLogin(name, email) {
   if (!acc) {
     const profile = defaultProfileState();
     profile.fullName = name;
-    acc = { password: null, profile };
+    acc = { password: null, role: "athlete", profile };
     accounts[email] = acc;
     saveAccounts(accounts);
   }
@@ -965,11 +1378,23 @@ function quickSocialLogin(name, email) {
 
 function enterAccount(email, acc) {
   localStorage.setItem(SESSION_KEY, email);
+  if (acc.role === "coach") {
+    setState({
+      screen: "app",
+      role: "coach",
+      currentEmail: email,
+      coachView: "roster",
+      selectedAthleteEmail: null,
+      coachBroadcast: localStorage.getItem("temprun_coach_broadcast") || "",
+      loginError: "",
+    });
+    return;
+  }
   const profile = acc.profile;
   if (profile.onboardingDone) {
-    setState({ screen: "app", currentEmail: email, profile, athleteTab: "panel", weekIndex: 0, loginError: "" });
+    setState({ screen: "app", role: "athlete", currentEmail: email, profile, athleteTab: "panel", weekIndex: 0, loginError: "" });
   } else {
-    setState({ screen: "onboarding", currentEmail: email, profile, onboardingStep: 1, loginError: "" });
+    setState({ screen: "onboarding", role: "athlete", currentEmail: email, profile, onboardingStep: 1, loginError: "" });
   }
 }
 
@@ -1002,14 +1427,22 @@ setProfile = function (patch) {
 /* ---------------- INIT ---------------- */
 
 (function init() {
+  ensureCoachAccount();
   const savedEmail = localStorage.getItem(SESSION_KEY);
   if (savedEmail) {
     const accounts = loadAccounts();
     const acc = accounts[savedEmail];
     if (acc) {
       state.currentEmail = savedEmail;
-      state.profile = acc.profile;
-      state.screen = acc.profile.onboardingDone ? "app" : "onboarding";
+      if (acc.role === "coach") {
+        state.role = "coach";
+        state.screen = "app";
+        state.coachBroadcast = localStorage.getItem("temprun_coach_broadcast") || "";
+      } else {
+        state.role = "athlete";
+        state.profile = acc.profile;
+        state.screen = acc.profile.onboardingDone ? "app" : "onboarding";
+      }
     }
   }
   render();
