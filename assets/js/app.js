@@ -1178,11 +1178,12 @@ function renderCoachRoster(athletes) {
   const alertsCount = athletes.filter((a) => a.alert).length;
 
   return `
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;">
+    <div class="coach-header-row" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;gap:14px;flex-wrap:wrap;">
       <div>
         <div style="margin-bottom:6px;font-size:26px;font-weight:800;">Panel de atletas</div>
         <div style="font-size:13.5px;color:var(--muted);">Vista general de tu equipo</div>
       </div>
+      <button class="logout-btn-lg coach-mobile-logout" style="width:auto;padding:10px 18px;" data-action="logout">Cerrar sesión</button>
     </div>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
