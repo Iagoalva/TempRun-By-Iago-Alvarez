@@ -22,8 +22,8 @@ const ACCOUNTS_KEY = "temprun_accounts";
 const SESSION_KEY = "temprun_session";
 const COACH_EMAIL = "coach@temprun.club";
 const COACH_PASSWORD = "TempRun2026";
-const GROUP_LABELS = { "5k": "5K", "10k": "10K", "21k": "21K", "42k": "42K" };
-const GROUP_ORDER = ["5k", "10k", "21k", "42k"];
+const GROUP_LABELS = { "3k": "3K", "5k": "5K", "10k": "10K" };
+const GROUP_ORDER = ["3k", "5k", "10k"];
 const PLAN_TYPE_OPTIONS = [
   ["rest", "Descanso"],
   ["easy", "Rodaje suave"],
@@ -421,7 +421,7 @@ function renderOnboarding() {
         <div>
           <div class="ob-label">DISTANCIA</div>
           <select class="ob-select" data-bind="profile.goalDistance">
-            ${["5K / 5000m", "10K / 10000m", "21K / 21097m", "42K / 42195m"].map((d) => `<option value="${d}" ${s.goalDistance === d ? "selected" : ""}>${d}</option>`).join("")}
+            ${["3K / 3000m", "5K / 5000m", "10K / 10000m"].map((d) => `<option value="${d}" ${s.goalDistance === d ? "selected" : ""}>${d}</option>`).join("")}
           </select>
         </div>
         <div>

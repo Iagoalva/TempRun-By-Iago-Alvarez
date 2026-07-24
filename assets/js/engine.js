@@ -12,10 +12,9 @@ const SESSION_TYPES = {
 };
 
 const RATIOS = {
+  "3k": { base: 0.42, dev: 0.3, specific: 0.2, taper: 0.08, min: 8 },
   "5k": { base: 0.4, dev: 0.3, specific: 0.2, taper: 0.1, min: 10 },
   "10k": { base: 0.4, dev: 0.3, specific: 0.2, taper: 0.1, min: 10 },
-  "21k": { base: 0.45, dev: 0.25, specific: 0.2, taper: 0.1, min: 14 },
-  "42k": { base: 0.5, dev: 0.25, specific: 0.17, taper: 0.08, min: 16 },
 };
 const PHASE_QUALITY = { base: 1, dev: 2, specific: 2, taper: 1 };
 const PHASE_NAMES = { base: "Base", dev: "Desarrollo", specific: "Específico", taper: "Tapering" };
@@ -108,10 +107,9 @@ function computePaces(vdot) {
 }
 function parseGoalDistance(str) {
   if (!str) return { km: 10, key: "10k", label: "10K" };
-  if (str.includes("42")) return { km: 42.2, key: "42k", label: "Maratón" };
-  if (str.includes("21")) return { km: 21.1, key: "21k", label: "Media Maratón" };
   if (str.includes("10")) return { km: 10, key: "10k", label: "10K" };
-  return { km: 5, key: "5k", label: "5K" };
+  if (str.includes("5")) return { km: 5, key: "5k", label: "5K" };
+  return { km: 3, key: "3k", label: "3K" };
 }
 function paceToMinutes(str) {
   const [m, s] = (str || "6:00").split(":").map(Number);
@@ -423,7 +421,7 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
     typeTag = "RITMO";
     title = `RITMO DE CARRERA (${km} KM)`;
     const mainKm = Math.max(km - 3, 1);
-    const racePace = distInfo.key === "42k" ? paces.marathon : paces.threshold;
+    const racePace = paces.threshold;
     blocks = [
       { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + progresiones." },
       { label: "PRINCIPAL", name: "Tramo a ritmo objetivo", dist: mainKm.toFixed(1) + "km", pace: racePace, zone: "Z3", fc: karvonen(0.7, 0.8, fcRest, fcMax), time: Math.round(mainKm * 4.75) + " min", desc: "Ritmo objetivo de carrera, sostenido y controlado." },
