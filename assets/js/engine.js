@@ -19,13 +19,13 @@ const RATIOS = {
 const PHASE_QUALITY = { base: 1, dev: 2, specific: 2, taper: 1 };
 const PHASE_NAMES = { base: "Base", dev: "Desarrollo", specific: "Específico", taper: "Tapering" };
 const LEVEL_WEEKLY_KM = {
-  Inicial: { min: 8, max: 20 },
-  "Principiante Bajo": { min: 10, max: 25 },
-  Principiante: { min: 15, max: 40 },
-  Intermedio: { min: 25, max: 60 },
+  Inicial: { min: 3, max: 10 },
+  "Principiante Bajo": { min: 5, max: 15 },
+  Principiante: { min: 10, max: 20 },
+  Intermedio: { min: 15, max: 40 },
 };
 const LEVEL_ORDER = ["Inicial", "Principiante Bajo", "Principiante", "Intermedio"];
-const MIN_AVAIL_DAYS = 3;
+const MIN_AVAIL_DAYS = 2;
 const DAY_KEYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 const CACO_TABLE = [
   { runSec: 120, walkSec: 180, reps: 5 },
@@ -185,8 +185,7 @@ function buildMacrocycle(s, paces, level) {
   });
   totalWeeks = cursor;
 
-  const age = ageFromBirthdate(s.birthdate);
-  const ratio = NOVICE_LEVELS.has(level) || age >= 45 ? 2 : 3;
+  const ratio = NOVICE_LEVELS.has(level) ? 2 : 3;
   const growth = level === "Inicial" ? 0.06 : level === "Principiante Bajo" ? 0.07 : level === "Intermedio" ? 0.1 : 0.09;
 
   const availCount = Math.max(MIN_AVAIL_DAYS, DAY_KEYS.filter((k) => s.availability[k]).length);

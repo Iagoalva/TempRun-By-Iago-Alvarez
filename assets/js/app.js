@@ -542,7 +542,8 @@ function computeRenderModel(profile, weekIndexParam) {
   const weekIndexRaw = weekIndexParam != null ? weekIndexParam : isOwn ? state.weekIndex : 0;
   const age = ageFromBirthdate(s.birthdate);
   const fcMax = fcMaxFromAge(age);
-  const fcRest = parseFloat(s.fcRest) || 60;
+  // sin FC en reposo cargada, las zonas caen a %FC máx puro (fcRest=0 en Karvonen = FC máx × %)
+  const fcRest = parseFloat(s.fcRest) || 0;
   const distInfo = parseGoalDistance(s.goalDistance);
   const level = levelFromAnswers(s.levelAnswers);
   const vdot = computeVdot(s.pbs, level);
@@ -920,7 +921,8 @@ function renderToolsTab() {
     const s = state.profile;
     const age = ageFromBirthdate(s.birthdate);
     const fcMax = fcMaxFromAge(age);
-    const fcRest = parseFloat(s.fcRest) || 60;
+    // sin FC en reposo cargada, las zonas caen a %FC máx puro (fcRest=0 en Karvonen = FC máx × %)
+  const fcRest = parseFloat(s.fcRest) || 0;
     const hasFc = !!s.birthdate || !!s.fcRest;
     calcResult = `
       <div class="week-summary" style="margin-top:18px;">
