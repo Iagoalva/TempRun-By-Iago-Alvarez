@@ -546,7 +546,7 @@ function computeRenderModel(profile, weekIndexParam) {
   const fcRest = parseFloat(s.fcRest) || 0;
   const distInfo = parseGoalDistance(s.goalDistance);
   const level = levelFromAnswers(s.levelAnswers);
-  const vdot = computeVdot(s.pbs, level);
+  const vdot = computeVdot(s.pbs);
   const paces = computePaces(vdot);
   const macro = buildMacrocycle(s, paces, level);
   const weekIndex = Math.max(0, Math.min(macro.totalWeeks - 1, weekIndexRaw));
@@ -870,7 +870,7 @@ function renderPlan(m) {
     <div class="week-summary">
       <div><span class="label">Volumen</span><div class="value">${m.doneKm.toFixed(1)} / ${m.totalKm.toFixed(1)} km</div></div>
       <div><span class="label">Plan cumplido</span><div class="value">${m.pct}%</div></div>
-      <div><span class="label">VDOT</span><div class="value">${Math.round(m.vdot)}</div></div>
+      <div><span class="label">VDOT</span><div class="value">${m.vdot == null ? "Sin marca" : Math.round(m.vdot)}</div></div>
       <div><span class="label">FC máx</span><div class="value">${m.fcMax} bpm</div></div>
     </div>`;
 }

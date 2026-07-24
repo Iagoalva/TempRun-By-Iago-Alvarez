@@ -69,7 +69,9 @@ function vdotFromPerf(distM, timeSec) {
   const pct = 0.8 + 0.1894393 * Math.exp(-0.012778 * t) + 0.2989558 * Math.exp(-0.1932605 * t);
   return vo2 / pct;
 }
-function computeVdot(pbs, level) {
+// Devuelve null si no hay ninguna marca de carrera cargada (3K/5K/10K) —
+// no inventamos un VDOT "típico" del nivel: sin marca real, no hay ritmo objetivo.
+function computeVdot(pbs) {
   const distMap = { p10k: 10000, p5k: 5000, p3k: 3000 };
   for (const key of ["p10k", "p5k", "p3k"]) {
     const sec = parseTime(pbs[key]);
@@ -79,9 +81,14 @@ function computeVdot(pbs, level) {
     const v = vdotFromPerf(distMap[key], sec);
     if (v >= 15 && v <= 85) return v;
   }
-  return { Inicial: 26, "Principiante Bajo": 30, Principiante: 34, Intermedio: 44 }[level] || 30;
+  return null;
 }
+// Sin VDOT (sin marca cargada), no hay ritmos objetivo: todos los campos vuelven null
+// y las sesiones se guían solo por zona de FC y sensación ("A sensación").
 function computePaces(vdot) {
+  if (vdot == null) {
+    return { easy: null, marathon: null, threshold: null, interval: null, repetition: null };
+  }
   const safeVdot = Math.min(85, Math.max(15, vdot));
   const velAtPct = (pct) => {
     const vo2 = safeVdot * pct;
@@ -343,6 +350,11 @@ function karvonen(lo, hi, fcRest, fcMax) {
 
 function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
   const z1 = karvonen(0.5, 0.6, fcRest, fcMax);
+  const hasPaces = paces.easy != null;
+  const NO_PACE = "A sensación";
+  const pc = (v) => (v == null ? NO_PACE : v);
+  const pcRange = (a, b) => (hasPaces ? `${a}-${b}` : NO_PACE);
+  const pcCombo = (a, b) => (hasPaces ? `${a}/${b}` : NO_PACE);
   if (d.isCaco) {
     const zRun = karvonen(0.65, 0.78, fcRest, fcMax);
     const fmtMin = (m) => (m === Math.floor(m) ? m : m.toFixed(1)) + " min";
@@ -356,7 +368,7 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
           label: "PRINCIPAL",
           name: `${d.cacoReps} x (Corre ${fmtMin(d.cacoRunMin)} + Camina ${d.cacoWalkMin > 0 ? fmtMin(d.cacoWalkMin) : "0 min"})`,
           dist: d.dist,
-          pace: paces.easy,
+          pace: pc(paces.easy),
           zone: "Z2/Z3",
           fc: zRun,
           time: Math.round((d.cacoRunMin + d.cacoWalkMin) * d.cacoReps) + " min",
@@ -378,9 +390,9 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
     typeTag = "SERIES";
     title = `SERIES ${reps}X${distEach}M (${km} KM)`;
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: restKm.toFixed(1) + "km", pace: paces.easy, zone: "Z1", fc: z1, time: "10 min", desc: "Trote suave + movilidad articular + 4 progresiones." },
-      { label: "PRINCIPAL", name: `${reps} x ${distEach}m`, dist: mainKm.toFixed(1) + "km", pace: repPace, zone: "Z4", fc: karvonen(0.8, 0.9, fcRest, fcMax), time: reps * 2 + " min", desc: `${reps} repeticiones a ritmo VDOT con ${Math.max(60, 180 - reps * 10)}s de trote suave entre series.` },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: restKm.toFixed(1) + "km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote regenerativo + estiramiento." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: restKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "10 min", desc: "Trote suave + movilidad articular + 4 progresiones." },
+      { label: "PRINCIPAL", name: `${reps} x ${distEach}m`, dist: mainKm.toFixed(1) + "km", pace: pc(repPace), zone: "Z4", fc: karvonen(0.8, 0.9, fcRest, fcMax), time: reps * 2 + " min", desc: hasPaces ? `${reps} repeticiones a ritmo VDOT con ${Math.max(60, 180 - reps * 10)}s de trote suave entre series.` : `${reps} repeticiones a esfuerzo alto (a sensación) con ${Math.max(60, 180 - reps * 10)}s de trote suave entre series.` },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: restKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "8 min", desc: "Trote regenerativo + estiramiento." },
     ];
   } else if (d.workout.toLowerCase().includes("fartlek")) {
     const isSoft = d.workout.toLowerCase().includes("suave");
@@ -388,14 +400,14 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
     title = isSoft ? `FARTLEK SUAVE · ADAPTACIÓN (${km} KM)` : `FARTLEK (${km} KM)`;
     blocks = isSoft
       ? [
-          { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + movilidad articular." },
-          { label: "PRINCIPAL", name: "Juego de ritmos suave", dist: Math.max(km - 3, 1).toFixed(1) + "km", pace: `${paces.marathon}/${paces.easy}`, zone: "Z2/Z3", fc: karvonen(0.65, 0.75, fcRest, fcMax), time: "15 min", desc: "Primer contacto con cambios de ritmo: 1 min moderado (Z3) / 2 min suave (Z2). Nada de esfuerzo máximo — es adaptación." },
-          { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Caminata o trote regenerativo." },
+          { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "1.5km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + movilidad articular." },
+          { label: "PRINCIPAL", name: "Juego de ritmos suave", dist: Math.max(km - 3, 1).toFixed(1) + "km", pace: pcCombo(paces.marathon, paces.easy), zone: "Z2/Z3", fc: karvonen(0.65, 0.75, fcRest, fcMax), time: "15 min", desc: "Primer contacto con cambios de ritmo: 1 min moderado (Z3) / 2 min suave (Z2). Nada de esfuerzo máximo — es adaptación." },
+          { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "8 min", desc: "Caminata o trote regenerativo." },
         ]
       : [
-          { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "2km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + movilidad articular." },
-          { label: "PRINCIPAL", name: "Juego de ritmos", dist: Math.max(km - 3.5, 1).toFixed(1) + "km", pace: `${paces.interval}/${paces.easy}`, zone: "Z3/Z4", fc: karvonen(0.75, 0.85, fcRest, fcMax), time: "25 min", desc: "Cambios de ritmo: 1 min ágil (Z4) / 1 min suave (Z2). Ideal para activar el sistema aeróbico." },
-          { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "5 min", desc: "Caminata o trote regenerativo." },
+          { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "2km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + movilidad articular." },
+          { label: "PRINCIPAL", name: "Juego de ritmos", dist: Math.max(km - 3.5, 1).toFixed(1) + "km", pace: pcCombo(paces.interval, paces.easy), zone: "Z3/Z4", fc: karvonen(0.75, 0.85, fcRest, fcMax), time: "25 min", desc: "Cambios de ritmo: 1 min ágil (Z4) / 1 min suave (Z2). Ideal para activar el sistema aeróbico." },
+          { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "5 min", desc: "Caminata o trote regenerativo." },
         ];
   } else if (d.type === "long") {
     const isSpecific = d.workout.toLowerCase().includes("ritmo objetivo");
@@ -403,18 +415,18 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
     title = `${isSpecific ? "FONDO CON RITMO OBJETIVO" : "FONDO LARGO"} (${km} KM)`;
     const mainKm = Math.max(km - 4, 1);
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "2km", pace: paces.easy, zone: "Z1", fc: z1, time: "10 min", desc: "Trote suave + movilidad articular." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "2km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "10 min", desc: "Trote suave + movilidad articular." },
       {
         label: "PRINCIPAL",
         name: isSpecific ? "Fondo a ritmo objetivo" : "Fondo continuo",
         dist: mainKm.toFixed(1) + "km",
-        pace: isSpecific ? paces.marathon : `${paces.easy}-${paces.marathon}`,
+        pace: isSpecific ? pc(paces.marathon) : pcRange(paces.easy, paces.marathon),
         zone: isSpecific ? "Z3" : "Z2/Z3",
         fc: karvonen(isSpecific ? 0.7 : 0.6, isSpecific ? 0.8 : 0.75, fcRest, fcMax),
         time: Math.round(mainKm * 5.5) + " min",
         desc: isSpecific ? "Últimos km a ritmo objetivo de carrera." : "Ritmo controlado y constante, últimos km a ritmo objetivo si llegás cómodo.",
       },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "2km", pace: paces.easy, zone: "Z1", fc: z1, time: "10 min", desc: "Caminata + estiramiento e hidratación." },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "2km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "10 min", desc: "Caminata + estiramiento e hidratación." },
     ];
   } else if (d.workout.toLowerCase().includes("ritmo de carrera")) {
     typeTag = "RITMO";
@@ -422,18 +434,18 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
     const mainKm = Math.max(km - 3, 1);
     const racePace = paces.threshold;
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + progresiones." },
-      { label: "PRINCIPAL", name: "Tramo a ritmo objetivo", dist: mainKm.toFixed(1) + "km", pace: racePace, zone: "Z3", fc: karvonen(0.7, 0.8, fcRest, fcMax), time: Math.round(mainKm * 4.75) + " min", desc: "Ritmo objetivo de carrera, sostenido y controlado." },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: paces.easy, zone: "Z1", fc: z1, time: "8 min", desc: "Trote regenerativo." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "1.5km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + progresiones." },
+      { label: "PRINCIPAL", name: "Tramo a ritmo objetivo", dist: mainKm.toFixed(1) + "km", pace: pc(racePace), zone: "Z3", fc: karvonen(0.7, 0.8, fcRest, fcMax), time: Math.round(mainKm * 4.75) + " min", desc: "Ritmo objetivo de carrera, sostenido y controlado." },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "8 min", desc: "Trote regenerativo." },
     ];
   } else {
     typeTag = "RODAJE";
     title = `RODAJE SUAVE (${km} KM)`;
     const mainKm = Math.max(km - 2, 1);
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "1km", pace: paces.easy, zone: "Z1", fc: z1, time: "5 min", desc: "Trote suave + movilidad articular." },
-      { label: "PRINCIPAL", name: "Rodaje continuo", dist: mainKm.toFixed(1) + "km", pace: paces.easy, zone: "Z2", fc: karvonen(0.6, 0.7, fcRest, fcMax), time: Math.round(mainKm * 5.7) + " min", desc: "Ritmo conversacional, controlado y cómodo." },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1km", pace: paces.easy, zone: "Z1", fc: z1, time: "5 min", desc: "Caminata + estiramiento suave." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "1km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "5 min", desc: "Trote suave + movilidad articular." },
+      { label: "PRINCIPAL", name: "Rodaje continuo", dist: mainKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z2", fc: karvonen(0.6, 0.7, fcRest, fcMax), time: Math.round(mainKm * 5.7) + " min", desc: "Ritmo conversacional, controlado y cómodo." },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "5 min", desc: "Caminata + estiramiento suave." },
     ];
   }
   blocks = blocks.map((b) => ({ ...b, zoneColor: b.zone.includes("1") ? "var(--muted)" : "var(--good)" }));
