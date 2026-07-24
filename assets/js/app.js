@@ -62,7 +62,7 @@ function defaultProfileState() {
     goalDistance: "10K / 10000m",
     goalDate: "",
     weeklyKm: 11,
-    levelAnswers: { q1: "", q2: "", q3: "", q4: "", q5: "" },
+    levelAnswers: { q1: "", q2: "", q3: "", q4: "", q5: "", q6: "", q7: "" },
     availability: { Lun: true, Mar: false, Mié: true, Jue: false, Vie: true, Sáb: false, Dom: false },
     pbs: { walk: "", p3k: "", p5k: "", p10k: "" },
     completed: {},
@@ -354,7 +354,16 @@ function renderOnboarding() {
   const step = state.onboardingStep;
   const dots = [1, 2, 3, 4, 5, 6, 7].map((n) => `<span class="${n <= step ? "active" : ""}"></span>`).join("");
   const level = levelFromAnswers(s.levelAnswers);
-  const levelComplete = !!(s.levelAnswers.q1 && s.levelAnswers.q2 && s.levelAnswers.q3 && s.levelAnswers.q4 && s.levelAnswers.q5);
+  const levelComplete = !!(
+    s.levelAnswers.q1 &&
+    s.levelAnswers.q2 &&
+    s.levelAnswers.q3 &&
+    s.levelAnswers.q4 &&
+    s.levelAnswers.q5 &&
+    s.levelAnswers.q6 &&
+    s.levelAnswers.q7
+  );
+  const levelWarnings = levelComplete ? levelAnswerWarnings(s.levelAnswers) : [];
   const availCount = DAY_KEYS.filter((k) => s.availability[k]).length;
   const goalMissing = step === 4 && (!s.goalName.trim() || !s.goalDate);
   const availTooFew = step === 7 && availCount < MIN_AVAIL_DAYS;
@@ -453,8 +462,15 @@ function renderOnboarding() {
         ${questionHtml("q3", "¿Cuántos km corrés por semana en promedio?", [["cero", "0 km"], ["poco", "1-15 km"], ["mas15", "+15 km"]], s)}
         ${questionHtml("q4", "¿Podés correr 30 minutos seguidos sin parar a caminar?", [["no", "No"], ["esfuerzo", "Con esfuerzo"], ["comodo", "Sí, cómodo"]], s)}
         ${questionHtml("q5", "¿Entrenaste alguna vez con un plan o corriste una carrera oficial?", [["si", "Sí"], ["no", "No"]], s)}
+        ${questionHtml("q6", "¿Cuándo corriste por última vez de forma regular?", [["nunca", "Nunca corrí regular"], ["mas6", "Hace + 6 meses"], ["menos6", "Hace - 6 meses"], ["activo", "Corro activamente ahora"]], s)}
+        ${questionHtml("q7", "¿Tuviste alguna lesión reciente que te haya limitado?", [["limitante", "Sí, todavía me limita"], ["recuperado", "Sí, ya recuperado/a"], ["no", "No"]], s)}
       </div>
-      ${levelComplete ? `<div class="level-detected"><span class="lbl">NIVEL DETECTADO</span><span class="val">${level}</span></div>` : ""}`;
+      ${levelComplete ? `<div class="level-detected"><span class="lbl">NIVEL DETECTADO</span><span class="val">${level}</span></div>` : ""}
+      ${
+        levelWarnings.length
+          ? `<div class="ob-error" style="margin-top:12px;">${levelWarnings.map((w) => `⚠ ${w}`).join("<br>")}</div>`
+          : ""
+      }`;
   } else if (step === 7) {
     body = `
       <div class="ob-title">DISPONIBILIDAD SEMANAL</div>
@@ -1558,7 +1574,7 @@ const ACTIONS = {
     if (step === 4 && (!s.goalName.trim() || !s.goalDate)) { render(); return; }
     if (step === 6) {
       const la = s.levelAnswers;
-      if (!(la.q1 && la.q2 && la.q3 && la.q4 && la.q5)) { render(); return; }
+      if (!(la.q1 && la.q2 && la.q3 && la.q4 && la.q5 && la.q6 && la.q7)) { render(); return; }
     }
     if (step === 7 && DAY_KEYS.filter((k) => s.availability[k]).length < MIN_AVAIL_DAYS) { render(); return; }
     if (step === 7) {

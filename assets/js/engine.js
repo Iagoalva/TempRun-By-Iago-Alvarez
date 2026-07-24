@@ -122,18 +122,45 @@ function paceToMinutes(str) {
   const [m, s] = (str || "6:00").split(":").map(Number);
   return (m || 6) + (s || 0) / 60;
 }
+// Puntaje por pregunta — define Inicial / Principiante Bajo / Principiante.
+// Intermedio queda aparte como filtro duro (ver levelFromAnswers): no alcanza con sumar
+// puntos si no hay una base aeróbica real, para no exponer a cargas altas sin sustento.
+const LEVEL_SCORE_WEIGHTS = {
+  q1: { si: 15, no: 0 },
+  q2: { nunca: 0, menos6: 8, mas6: 15 },
+  q3: { cero: 0, poco: 8, mas15: 15 },
+  q4: { no: 0, esfuerzo: 10, comodo: 20 },
+  q5: { si: 10, no: 0 },
+  q6: { nunca: 0, mas6: 3, menos6: 7, activo: 12 },
+  q7: { limitante: -10, recuperado: 0, no: 5 },
+};
+
+function levelScore(a) {
+  let total = 0;
+  for (const q in LEVEL_SCORE_WEIGHTS) {
+    total += LEVEL_SCORE_WEIGHTS[q][a[q]] || 0;
+  }
+  return Math.max(0, total);
+}
+
 function levelFromAnswers(a) {
-  const regular = a.q1 === "si";
-  const experienced = a.q2 === "mas6";
-  const kmOk = a.q3 === "mas15";
-  const sustains30 = a.q4 === "comodo";
-  const hasPlanOrRace = a.q5 === "si";
-  if (!regular && !sustains30 && !hasPlanOrRace) return "Inicial";
-  if (experienced && kmOk && sustains30) return "Intermedio";
-  // resto de casos: corre o hizo alguna carrera, pero todavía no sostiene 30 min cómodo
-  // → arranca con un CACO corto en vez de ir directo a fartlek
-  if (!sustains30) return "Principiante Bajo";
+  const isIntermedio = a.q2 === "mas6" && a.q3 === "mas15" && a.q4 === "comodo" && a.q7 !== "limitante";
+  if (isIntermedio) return "Intermedio";
+  const score = levelScore(a);
+  if (score <= 20) return "Inicial";
+  if (score <= 45) return "Principiante Bajo";
   return "Principiante";
+}
+
+// Combinaciones de respuestas que no tienen sentido juntas — se muestran como aviso
+// para que el atleta revise, sin bloquear el avance (el coach puede reclasificar a mano igual).
+function levelAnswerWarnings(a) {
+  const warns = [];
+  if (a.q1 === "si" && a.q3 === "cero") warns.push("Dijiste que corrés de forma regular, pero marcaste 0 km semanales.");
+  if (a.q1 === "no" && a.q3 === "mas15") warns.push("Dijiste que no corrés de forma regular, pero marcaste +15 km semanales.");
+  if (a.q4 === "comodo" && a.q3 === "cero") warns.push("Dijiste que sostenés 30 min cómodo, pero marcaste 0 km semanales.");
+  if (a.q6 === "activo" && a.q1 === "no") warns.push("Dijiste que corrés activamente ahora, pero también que no corrés de forma regular.");
+  return warns;
 }
 function weekAdherence(completed, weekIdx, trainDays) {
   let done = 0,
