@@ -16,6 +16,8 @@ const ICONS = {
   person: `<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="8" r="3.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M4 20c0-3.6 3.2-6 8-6s8 2.4 8 6" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>`,
   phone: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 3h3l2 5-2.5 1.5a12 12 0 0 0 5 5L15 12l5 2v3c0 1.1-.9 2-2 2C10.6 19 5 13.4 5 6c0-1.1.9-2 2-2z" fill="none" stroke="var(--muted)" stroke-width="1.4" stroke-linejoin="round"/></svg>`,
   people: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="9" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 20c0-2.2 1-4 3.5-4.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`,
+  refresh: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-.8 12.1a2 2 0 0 1-2 1.9H9.8a2 2 0 0 1-2-1.9L7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
 const ACCOUNTS_KEY = "temprun_accounts";
@@ -835,9 +837,13 @@ function renderPlan(m) {
         <div class="phase-full">${m.phaseLabelFull}</div>
         ${m.weekMeta.adjustNote ? `<div class="adjust-note">⚠ ${m.weekMeta.adjustNote}</div>` : ""}
       </div>
-      <div class="week-nav">
-        <button data-action="weekPrev">‹</button>
-        <button data-action="weekNext">›</button>
+      <div class="plan-header-actions">
+        <button class="date-nav-btn" title="Reiniciar progreso del plan" data-action="resetPlanProgress">${ICONS.refresh}</button>
+        <button class="date-nav-btn" title="Crear un plan nuevo" data-action="startNewPlan">${ICONS.trash}</button>
+        <div class="week-nav">
+          <button data-action="weekPrev">‹</button>
+          <button data-action="weekNext">›</button>
+        </div>
       </div>
     </div>
 
@@ -1603,6 +1609,26 @@ const ACTIONS = {
   weekPrev: () => setState((s) => ({ weekIndex: Math.max(0, s.weekIndex - 1), expandedKey: null, selectedDayIdx: null })),
   weekNext: () => setState({ weekIndex: state.weekIndex + 1, expandedKey: null, selectedDayIdx: null }),
   jumpWeek: (el) => setState({ weekIndex: parseInt(el.dataset.idx, 10), expandedKey: null }),
+  resetPlanProgress: () => {
+    if (!confirm("¿Reiniciar el progreso del plan actual? Se borrarán los entrenamientos marcados como completados y las sincronizaciones de Strava, pero mantenés el mismo objetivo y nivel.")) return;
+    setProfile({ completed: {}, dayOverrides: {}, stravaActivities: {} });
+    setState({ weekIndex: 0, expandedKey: null, selectedDayIdx: null });
+  },
+  startNewPlan: () => {
+    if (!confirm("¿Crear un plan nuevo? Vas a volver a definir tu objetivo, marcas personales y nivel. Tu perfil y datos de salud se mantienen.")) return;
+    setProfile((p) => ({
+      goalName: "",
+      goalDate: "",
+      weeklyKm: 11,
+      levelAnswers: { q1: "", q2: "", q3: "", q4: "", q5: "", q6: "", q7: "" },
+      pbs: { walk: "", p3k: "", p5k: "", p10k: "" },
+      completed: {},
+      dayOverrides: {},
+      stravaActivities: {},
+      onboardingDone: false,
+    }));
+    setState({ screen: "onboarding", onboardingStep: 4, weekIndex: 0, expandedKey: null, selectedDayIdx: null, athleteTab: "panel" });
+  },
   toggleDone: (key) => {
     const k = typeof key === "string" ? key : key.dataset.key;
     setProfile((p) => ({ completed: { ...p.completed, [k]: !p.completed[k] } }));
