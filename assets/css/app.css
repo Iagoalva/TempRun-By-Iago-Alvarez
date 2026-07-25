@@ -419,6 +419,23 @@ button {
   font-weight: 800;
   color: var(--muted);
 }
+.pb-numfield {
+  width: 32%;
+}
+.pb-seg-toggle {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: 100%;
+  color: var(--text);
+  font-weight: 800;
+  text-align: center;
+  font-size: 16px;
+}
+.pb-seg-toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
 
 /* Custom date picker */
 .datefield {
@@ -504,6 +521,60 @@ button {
   font-size: 12.5px;
   font-weight: 700;
   min-width: 0;
+}
+
+.numfield {
+  position: relative;
+}
+.num-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 201;
+  width: 220px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  padding: 14px;
+}
+.num-popup .date-popup-header {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.num-scroll-list {
+  max-height: 220px;
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 78px 0;
+  mask-image: linear-gradient(to bottom, transparent, black 35%, black 65%, transparent);
+}
+.num-cell {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  scroll-snap-align: center;
+  text-align: center;
+  padding: 10px 0;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.num-cell:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+.num-cell.selected {
+  background: color-mix(in oklch, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 17px;
 }
 .date-weekdays {
   display: grid;

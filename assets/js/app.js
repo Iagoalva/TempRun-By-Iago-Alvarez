@@ -207,6 +207,8 @@ let state = {
 
   openDatePicker: null, // bind path currently open, or null
   datePickerView: {}, // { [path]: { year, month } } month is 0-11
+  // selector de número tipo "rueda" (scroll + tap), reemplaza el tipeo libre
+  openNumPicker: null, // bind path currently open, or null
 };
 
 /* ---------------- CUSTOM DATE PICKER ---------------- */
@@ -295,6 +297,45 @@ function renderDatePicker(path, isoValue, opts) {
     </div>`;
 }
 
+/* ---------------- SELECTOR DE NÚMERO (RUEDA) ---------------- */
+// Reemplaza el tipeo libre por una lista deslizable: se desliza para acercar el valor
+// y se toca para confirmarlo — igual de rápido en el celu que el teclado numérico, sin
+// el vaivén de mostrar/ocultar el teclado del sistema en cada campo.
+function renderNumberPicker(path, value, opts) {
+  opts = opts || {};
+  const min = opts.min != null ? opts.min : 0;
+  const max = opts.max != null ? opts.max : 100;
+  const step = opts.step || 1;
+  const unit = opts.unit || "";
+  const isOpen = state.openNumPicker === path;
+  const hasValue = value !== "" && value != null;
+
+  const items = [];
+  for (let n = min; n <= max; n += step) items.push(n);
+
+  return `
+    <div class="numfield">
+      <button type="button" class="date-toggle" data-action="toggleNumPicker" data-path="${esc(path)}">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 9h16M4 15h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span class="${hasValue ? "" : "placeholder"}">${hasValue ? value + (unit ? " " + unit : "") : opts.placeholder || "Elegir"}</span>
+      </button>
+      ${
+        isOpen
+          ? `
+        <div class="date-overlay" data-action="closeNumPicker"></div>
+        <div class="num-popup">
+          <div class="date-popup-header" style="justify-content:center;">${opts.label || "Elegí un valor"}${unit ? ` (${unit})` : ""}</div>
+          <div class="num-scroll-list" data-path="${esc(path)}">
+            ${items
+              .map((n) => `<button type="button" class="num-cell${n === value || String(n) === String(value) ? " selected" : ""}" data-action="numSelect" data-path="${esc(path)}" data-val="${n}">${n}</button>`)
+              .join("")}
+          </div>
+        </div>`
+          : ""
+      }
+    </div>`;
+}
+
 function setState(patch) {
   Object.assign(state, typeof patch === "function" ? patch(state) : patch);
   render();
@@ -310,7 +351,6 @@ function focusSelector(el) {
   if (!el || !el.dataset) return null;
   const d = el.dataset;
   if (d.bind) return `[data-bind="${cssEsc(d.bind)}"]`;
-  if (d.action === "pbSeg") return `[data-action="pbSeg"][data-pb="${cssEsc(d.pb)}"][data-part="${cssEsc(d.part)}"]`;
   if (d.action === "coachSetDayKm") return `[data-action="coachSetDayKm"][data-idx="${cssEsc(d.idx)}"]`;
   if (d.action === "broadcastInput" || d.action === "athleteMessageInput") return `[data-action="${d.action}"]`;
   return null;
@@ -483,16 +523,16 @@ function renderOnboarding() {
       <div class="ob-grid-2" style="margin-bottom:14px;">
         <div>
           <div class="ob-label">PESO (KG)</div>
-          <div class="ob-field-icon"><span>⚖️</span><input data-bind="profile.weight" value="${esc(s.weight)}"></div>
+          ${renderNumberPicker("profile.weight", s.weight, { min: 30, max: 180, unit: "kg", label: "Elegí tu peso", placeholder: "Elegir peso" })}
         </div>
         <div>
           <div class="ob-label">ALTURA (CM)</div>
-          <div class="ob-field-icon"><span>📏</span><input data-bind="profile.height" value="${esc(s.height)}"></div>
+          ${renderNumberPicker("profile.height", s.height, { min: 130, max: 220, unit: "cm", label: "Elegí tu altura", placeholder: "Elegir altura" })}
         </div>
       </div>
       <div>
         <div class="ob-label">FC EN REPOSO (BPM)</div>
-        <div class="ob-field-icon"><svg viewBox="0 0 24 24" width="15" height="15"><path d="M3 12h4l2-6 4 12 2-6h6" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linejoin="round"/></svg><input data-bind="profile.fcRest" value="${esc(s.fcRest)}"></div>
+        ${renderNumberPicker("profile.fcRest", s.fcRest, { min: 35, max: 100, unit: "bpm", label: "Elegí tu FC en reposo", placeholder: "Elegir FC en reposo" })}
       </div>`;
   } else if (step === 3) {
     body = `
@@ -587,12 +627,39 @@ function pbFieldHtml(f, s, obContext) {
         <button class="pb-none-btn" data-action="pbToggleNone" data-pb="${f.key}" style="background:${isNone ? "var(--accent)" : "var(--surface2)"};color:${isNone ? "var(--accent-ink)" : "var(--muted)"};">No tengo</button>
       </div>
       <div class="pb-segments" style="opacity:${isNone ? 0.35 : 1};">
-        <input data-action="pbSeg" data-pb="${f.key}" data-part="h" ${isNone ? "disabled" : ""} placeholder="00" inputmode="numeric" maxlength="2" value="${esc(parts.h)}">
+        ${renderPbSegPicker(f.key, "h", parts.h, { min: 0, max: 5, label: "Horas", disabled: isNone })}
         <span>:</span>
-        <input data-action="pbSeg" data-pb="${f.key}" data-part="m" ${isNone ? "disabled" : ""} placeholder="00" inputmode="numeric" maxlength="2" value="${esc(parts.m)}">
+        ${renderPbSegPicker(f.key, "m", parts.m, { min: 0, max: 59, label: "Minutos", disabled: isNone })}
         <span>:</span>
-        <input data-action="pbSeg" data-pb="${f.key}" data-part="s" ${isNone ? "disabled" : ""} placeholder="00" inputmode="numeric" maxlength="2" value="${esc(parts.s)}">
+        ${renderPbSegPicker(f.key, "s", parts.s, { min: 0, max: 59, label: "Segundos", disabled: isNone })}
       </div>
+    </div>`;
+}
+
+function renderPbSegPicker(pbKey, part, value, opts) {
+  opts = opts || {};
+  const min = opts.min != null ? opts.min : 0;
+  const max = opts.max != null ? opts.max : 59;
+  const pickerPath = `pbseg:${pbKey}:${part}`;
+  const isOpen = state.openNumPicker === pickerPath;
+  const curVal = value !== "" && value != null ? parseInt(value, 10) : null;
+  const items = [];
+  for (let n = min; n <= max; n++) items.push(n);
+  return `
+    <div class="numfield pb-numfield">
+      <button type="button" class="pb-seg-toggle" ${opts.disabled ? "disabled" : ""} data-action="toggleNumPicker" data-path="${pickerPath}">${curVal != null ? pad2(curVal) : "00"}</button>
+      ${
+        isOpen
+          ? `
+        <div class="date-overlay" data-action="closeNumPicker"></div>
+        <div class="num-popup">
+          <div class="date-popup-header" style="justify-content:center;">${opts.label || ""}</div>
+          <div class="num-scroll-list" data-path="${pickerPath}">
+            ${items.map((n) => `<button type="button" class="num-cell${curVal === n ? " selected" : ""}" data-action="pbSegSelect" data-pb="${pbKey}" data-part="${part}" data-val="${n}">${pad2(n)}</button>`).join("")}
+          </div>
+        </div>`
+          : ""
+      }
     </div>`;
 }
 
@@ -1582,18 +1649,6 @@ function bindDynamicListeners() {
       });
     }
   });
-  root.querySelectorAll('[data-action="pbSeg"]').forEach((el) => {
-    el.addEventListener("input", () => {
-      const key = el.dataset.pb,
-        part = el.dataset.part;
-      const digits = el.value.replace(/\D/g, "").slice(0, 2);
-      setProfile((p) => {
-        const cur = pbParts(p.pbs[key] === "NONE" ? "" : p.pbs[key]);
-        cur[part] = digits;
-        return { pbs: { ...p.pbs, [key]: `${cur.h || "0"}:${cur.m || "00"}:${cur.s || "00"}` } };
-      });
-    });
-  });
   root.querySelectorAll('[data-action="broadcastInput"]').forEach((el) => {
     el.addEventListener("input", () => {
       state.coachBroadcast = el.value;
@@ -1634,6 +1689,10 @@ function bindDynamicListeners() {
     el.addEventListener("input", () => {
       coachSetDay(parseInt(el.dataset.idx, 10), el.dataset.typekey, parseFloat(el.value) || 0);
     });
+  });
+  root.querySelectorAll(".num-scroll-list").forEach((list) => {
+    const sel = list.querySelector(".num-cell.selected");
+    (sel || list.firstElementChild)?.scrollIntoView({ block: "center" });
   });
 }
 
@@ -1952,6 +2011,30 @@ const ACTIONS = {
     state.openDatePicker = null;
     render();
     persistCurrentProfile();
+  },
+
+  toggleNumPicker: (el) => {
+    const path = el.dataset.path;
+    setState({ openNumPicker: state.openNumPicker === path ? null : path });
+  },
+  closeNumPicker: () => setState({ openNumPicker: null }),
+  numSelect: (el) => {
+    const path = el.dataset.path;
+    setByPath(state, path, el.dataset.val);
+    state.openNumPicker = null;
+    render();
+    persistCurrentProfile();
+  },
+  pbSegSelect: (el) => {
+    const key = el.dataset.pb,
+      part = el.dataset.part,
+      val = pad2(parseInt(el.dataset.val, 10));
+    setProfile((p) => {
+      const cur = pbParts(p.pbs[key] === "NONE" ? "" : p.pbs[key]);
+      cur[part] = val;
+      return { pbs: { ...p.pbs, [key]: `${cur.h || "0"}:${cur.m || "00"}:${cur.s || "00"}` } };
+    });
+    setState({ openNumPicker: null });
   },
 };
 
