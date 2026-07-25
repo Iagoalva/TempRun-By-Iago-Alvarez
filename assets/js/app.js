@@ -1652,6 +1652,25 @@ function setByPath(obj, path, value) {
   cur[parts[parts.length - 1]] = value;
 }
 
+// Filtra en el momento cualquier caracter que no sea dígito o separador decimal — no deja
+// escribir letras en los campos de km (entrada en calor, vuelta a la calma, km total).
+function sanitizeDecimalInput(el) {
+  let v = el.value.replace(/[^0-9.,]/g, "");
+  const sep = v.match(/[.,]/);
+  if (sep) {
+    const sepIndex = v.indexOf(sep[0]);
+    v = v.slice(0, sepIndex + 1) + v.slice(sepIndex + 1).replace(/[.,]/g, "");
+  }
+  if (v !== el.value) {
+    const pos = el.selectionStart - (el.value.length - v.length);
+    el.value = v;
+    try {
+      el.setSelectionRange(pos, pos);
+    } catch (e) {}
+  }
+  return v;
+}
+
 function bindDynamicListeners() {
   root.querySelectorAll("[data-bind]").forEach((el) => {
     const path = el.getAttribute("data-bind");
@@ -1699,18 +1718,25 @@ function bindDynamicListeners() {
   });
   root.querySelectorAll('[data-action="coachSetDayType"]').forEach((el) => {
     el.addEventListener("change", () => {
-      coachSetDay(parseInt(el.dataset.idx, 10), el.value, parseFloat(el.dataset.km) || 0);
+      // acá sí querés un default razonable (8) si el día no tenía km todavía (ej. venía de
+      // "Descanso", que muestra 0) — es un caso distinto a estar editando el campo de km.
+      coachSetDay(parseInt(el.dataset.idx, 10), el.value, parseFloat(el.dataset.km) || 8);
     });
   });
   root.querySelectorAll('[data-action="coachSetDayKm"]').forEach((el) => {
     el.addEventListener("input", () => {
       const idx = parseInt(el.dataset.idx, 10);
+      sanitizeDecimalInput(el);
       // guardamos el texto tal cual se está tipeando (borrador) para que el render no lo
       // reformatee a mitad de tipeo — ej. al escribir "3," antes de llegar a "3,5"
       state.coachKmDraft = { ...state.coachKmDraft, [idx]: el.value };
       // acepta coma o punto como separador decimal (teclados en español escriben ",")
       const normalized = el.value.replace(",", ".");
-      coachSetDay(idx, el.dataset.typekey, parseFloat(normalized) || 0);
+      const parsed = parseFloat(normalized);
+      // ojo: "|| 0" con un 0 real (o el campo vacío mientras se borra el número para escribir
+      // uno nuevo) es falsy iguel que NaN — eso hacía que coachSetDay() volviera a poner 8 de
+      // vuelta apenas se borraba el campo. Con isNaN se respeta el 0 real tal cual se tipeó.
+      coachSetDay(idx, el.dataset.typekey, isNaN(parsed) ? 0 : parsed);
     });
     el.addEventListener("blur", () => {
       const idx = parseInt(el.dataset.idx, 10);
@@ -1730,6 +1756,7 @@ function bindDynamicListeners() {
       const idx = parseInt(el.dataset.idx, 10),
         part = el.dataset.part;
       const draftKey = idx + "-" + part;
+      sanitizeDecimalInput(el);
       state.coachEdgeDraft = { ...state.coachEdgeDraft, [draftKey]: el.value };
       const normalized = el.value.replace(",", ".");
       const parsed = parseFloat(normalized);
@@ -1761,7 +1788,9 @@ function coachSetDay(idx, typeKey, km) {
   const acc = accounts[state.selectedAthleteEmail];
   if (!acc) return;
   const cfg = SESSION_TYPES[typeKey];
-  const finalKm = cfg.type === "rest" ? 0 : km || 8;
+  // Number.isFinite(0) es true — a diferencia de "km || 8", esto no pisa un 0 real (el
+  // atleta está borrando el campo para tipear un número nuevo) con el default de 8.
+  const finalKm = cfg.type === "rest" ? 0 : Number.isFinite(km) ? km : 8;
   const key = (state.coachWeekIndex || 0) + "-" + idx;
   // se preservan los overrides de entrada/vuelta que ya se hubieran cargado para este día,
   // así cambiar el tipo o el km total no los borra.
