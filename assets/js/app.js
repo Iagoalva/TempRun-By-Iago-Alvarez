@@ -869,6 +869,7 @@ function renderSessionBody(d, expandedForced) {
             <div class="today-title">${d.day} · ${d.sessionInfo.title}</div>
           </div>
         </div>
+        <button class="done-btn" style="background:${d.done ? "color-mix(in oklch, var(--good) 20%, transparent)" : "var(--surface2)"};color:${d.done ? "var(--good)" : "var(--text)"}" data-action="toggleDoneStop" data-key="${d.key}">${d.done ? "COMPLETADO ✓" : "MARCAR COMPLETADO"}</button>
       </div>
       ${expanded ? renderStravaActual(state.profile, d.key) + renderBlocksGrid(d.sessionInfo.blocks) : ""}
     </div>`;

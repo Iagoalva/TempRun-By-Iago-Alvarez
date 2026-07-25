@@ -265,6 +265,11 @@ function buildMacrocycle(s, paces, level) {
 
   const ratio = NOVICE_LEVELS.has(level) ? 2 : 3;
   const growth = level === "Inicial" ? 0.06 : level === "Principiante Bajo" ? 0.07 : level === "Intermedio" ? 0.1 : 0.09;
+  // la descarga programada recorta desde el PICO alcanzado hasta ahora, no desde la semana
+  // anterior — así cada ciclo de carga vuelve a crecer desde cerca del máximo previo en vez
+  // de perder terreno para siempre. El recorte es más suave para niveles noveles (ciclos de
+  // carga más cortos) para que el resultado neto de cada ciclo siga siendo un avance.
+  const deloadFactor = NOVICE_LEVELS.has(level) ? 0.88 : 0.8;
 
   const availCount = Math.max(MIN_AVAIL_DAYS, DAY_KEYS.filter((k) => s.availability[k]).length);
   const range = LEVEL_WEEKLY_KM[level] || LEVEL_WEEKLY_KM.Intermedio;
@@ -311,7 +316,7 @@ function buildMacrocycle(s, paces, level) {
         adjustNote = "Carga reducida — baja adherencia la semana pasada";
       } else if (sinceDeload > ratio) {
         isDeload = true;
-        current = current * 0.72;
+        current = peakVol * deloadFactor;
         sinceDeload = 0;
         adjustNote = "Semana de descarga programada — recuperación activa cada ciertas semanas de carga";
       } else if (i > 0) {
