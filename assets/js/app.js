@@ -34,6 +34,67 @@ const ACCOUNTS_KEY = "temprun_accounts";
 const SESSION_KEY = "temprun_session";
 const COACH_EMAIL = "coach@temprun.club";
 const COACH_PASSWORD = "TempRun2026";
+
+/* ---------------- SUPABASE (cuentas compartidas entre dispositivos) ----------------
+   La clave "publishable" es segura para exponer en el navegador: la tabla "accounts"
+   tiene una policy de Row Level Security abierta pensada para esta beta cerrada (ver
+   el SQL de setup). localStorage sigue siendo la fuente de verdad instantánea de este
+   dispositivo — Supabase es una capa de sincronización en segundo plano por arriba. */
+const SUPABASE_URL = "https://bhbexadljhubqpsbsale.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_vlCEFRIgMe1XkNvql-YOCg_F5Ho2BkZ";
+const sb = typeof window !== "undefined" && window.supabase && SUPABASE_URL ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const SUPABASE_SYNC_INTERVAL_MS = 8000;
+// campos del perfil de un atleta que puede escribir el coach desde su propio dispositivo —
+// al sincronizar, solo estos se pisan con lo que venga del servidor para la cuenta propia
+// (todo lo demás sigue mandando el estado local, para no perder ediciones en curso).
+const COACH_WRITABLE_PROFILE_FIELDS = ["chatMessages", "coachMessage", "dayOverrides", "stravaActivities"];
+
+async function pushAccountsToSupabase(accounts) {
+  if (!sb) return;
+  const rows = Object.entries(accounts).map(([email, data]) => ({ email, data }));
+  if (!rows.length) return;
+  try {
+    const { error } = await sb.from("accounts").upsert(rows);
+    if (error) console.warn("Supabase: no se pudo guardar", error.message);
+  } catch (e) {
+    console.warn("Supabase: error de red al guardar", e);
+  }
+}
+
+async function pullAccountsFromSupabase() {
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from("accounts").select("email,data");
+    if (error || !data) {
+      if (error) console.warn("Supabase: no se pudo sincronizar", error.message);
+      return;
+    }
+    const local = loadAccounts();
+    let changed = false;
+    for (const row of data) {
+      const remote = row.data;
+      const isMe = row.email === state.currentEmail;
+      if (isMe && state.role === "athlete" && state.profile && remote && remote.profile) {
+        COACH_WRITABLE_PROFILE_FIELDS.forEach((f) => {
+          if (JSON.stringify(state.profile[f]) !== JSON.stringify(remote.profile[f])) {
+            state.profile[f] = remote.profile[f];
+            changed = true;
+          }
+        });
+        if (local[row.email]) local[row.email].profile = state.profile;
+      } else if (!isMe) {
+        if (JSON.stringify(local[row.email]) !== JSON.stringify(remote)) {
+          local[row.email] = remote;
+          changed = true;
+        }
+      }
+    }
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(local));
+    if (changed) render();
+  } catch (e) {
+    console.warn("Supabase: error de red al sincronizar", e);
+  }
+}
 const GROUP_LABELS = { "3k": "3K", "5k": "5K", "10k": "10K" };
 const GROUP_ORDER = ["3k", "5k", "10k"];
 const PLAN_TYPE_OPTIONS = [
@@ -52,6 +113,7 @@ function loadAccounts() {
 }
 function saveAccounts(accounts) {
   localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+  pushAccountsToSupabase(accounts);
 }
 function ensureCoachAccount() {
   const accounts = loadAccounts();
@@ -1993,4 +2055,8 @@ setProfile = function (patch) {
     }
   }
   render();
+  if (sb) {
+    pullAccountsFromSupabase();
+    setInterval(pullAccountsFromSupabase, SUPABASE_SYNC_INTERVAL_MS);
+  }
 })();
