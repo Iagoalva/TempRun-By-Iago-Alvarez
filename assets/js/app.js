@@ -187,6 +187,7 @@ let state = {
   coachExpandedKey: null,
   coachChatInput: "",
   coachKmDraft: {}, // { [dayIdx]: texto tal cual lo está tipeando el coach, para no reformatear a mitad de tipeo }
+  coachEdgeDraft: {}, // { "[dayIdx]-warmupKmOverride"|"[dayIdx]-cooldownKmOverride": texto tal cual se tipea }
   stravaJustSynced: false,
   // herramientas calculators (local, not persisted)
   toolDistance: "5000",
@@ -349,6 +350,7 @@ function focusSelector(el) {
   const d = el.dataset;
   if (d.bind) return `[data-bind="${cssEsc(d.bind)}"]`;
   if (d.action === "coachSetDayKm") return `[data-action="coachSetDayKm"][data-idx="${cssEsc(d.idx)}"]`;
+  if (d.action === "coachSetEdge") return `[data-action="coachSetEdge"][data-idx="${cssEsc(d.idx)}"][data-part="${cssEsc(d.part)}"]`;
   if (d.action === "broadcastInput" || d.action === "athleteMessageInput") return `[data-action="${d.action}"]`;
   return null;
 }
@@ -952,25 +954,35 @@ function renderStravaActual(profile, key) {
     </div>`;
 }
 
-function renderBlocksGrid(blocks) {
+function renderBlocksGrid(sessionInfo, editDayIdx) {
+  const blocks = sessionInfo.blocks || sessionInfo; // admite pasar blocks directo (uso de solo lectura)
+  const canEditEdges = editDayIdx != null && sessionInfo.warmupKm != null;
   return `
     <div class="blocks-grid">
       ${blocks
-        .map(
-          (b) => `
+        .map((b, i) => {
+          const isEdge = i === 0 || i === blocks.length - 1;
+          const editable = canEditEdges && isEdge;
+          const part = i === 0 ? "warmupKmOverride" : "cooldownKmOverride";
+          const draftKey = editDayIdx + "-" + part;
+          const rawVal = i === 0 ? sessionInfo.warmupKm : sessionInfo.cooldownKm;
+          const distCell = editable
+            ? `<input type="text" inputmode="decimal" data-action="coachSetEdge" data-idx="${editDayIdx}" data-part="${part}" value="${state.coachEdgeDraft[draftKey] != null ? state.coachEdgeDraft[draftKey] : rawVal}" style="width:100%;background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text);font-weight:800;font-size:13px;padding:0 0 2px;">`
+            : b.dist;
+          return `
         <div class="block-card">
           <div class="b-label">${b.label}</div>
           <div class="b-name">${b.name}</div>
           <div class="block-mini-grid">
-            <div class="block-mini"><div class="k">DIST</div><div class="v">${b.dist}</div></div>
+            <div class="block-mini"><div class="k">DIST</div><div class="v">${distCell}</div></div>
             <div class="block-mini"><div class="k">RITMO /KM</div><div class="v" style="color:var(--accent)">${b.pace}</div></div>
             <div class="block-mini"><div class="k">ZONA</div><div class="v" style="color:${b.zoneColor}">${b.zone}</div></div>
             <div class="block-mini"><div class="k">FC TARGET</div><div class="v" style="color:var(--pink)">${b.fc}</div></div>
           </div>
           <div class="block-mini" style="margin-bottom:8px;"><div class="k">TIEMPO</div><div class="v">${b.time}</div></div>
           <div class="b-desc">${b.desc}</div>
-        </div>`
-        )
+        </div>`;
+        })
         .join("")}
     </div>`;
 }
@@ -1603,7 +1615,7 @@ function renderCoachDetail() {
                   : ""
               }
             </div>
-            ${d.hasSession && d.expanded ? renderStravaActual(profile, d.key) + renderBlocksGrid(d.sessionInfo.blocks) : ""}
+            ${d.hasSession && d.expanded ? renderStravaActual(profile, d.key) + renderBlocksGrid(d.sessionInfo, d.i) : ""}
           </div>`
           )
           .join("")}
@@ -1702,10 +1714,36 @@ function bindDynamicListeners() {
     });
     el.addEventListener("blur", () => {
       const idx = parseInt(el.dataset.idx, 10);
-      const draft = { ...state.coachKmDraft };
-      delete draft[idx];
-      state.coachKmDraft = draft;
-      render();
+      // se difiere al siguiente tick: si el blur es porque el usuario clickeó otro botón
+      // (ej. "EDITAR SESIÓN"), un render() síncrono acá reemplaza el DOM a mitad del click
+      // y ese click se pierde — con setTimeout el click ya terminó de procesarse.
+      setTimeout(() => {
+        const draft = { ...state.coachKmDraft };
+        delete draft[idx];
+        state.coachKmDraft = draft;
+        render();
+      }, 0);
+    });
+  });
+  root.querySelectorAll('[data-action="coachSetEdge"]').forEach((el) => {
+    el.addEventListener("input", () => {
+      const idx = parseInt(el.dataset.idx, 10),
+        part = el.dataset.part;
+      const draftKey = idx + "-" + part;
+      state.coachEdgeDraft = { ...state.coachEdgeDraft, [draftKey]: el.value };
+      const normalized = el.value.replace(",", ".");
+      coachSetEdge(idx, part, parseFloat(normalized) || 0.1);
+    });
+    el.addEventListener("blur", () => {
+      const idx = parseInt(el.dataset.idx, 10),
+        part = el.dataset.part;
+      const draftKey = idx + "-" + part;
+      setTimeout(() => {
+        const draft = { ...state.coachEdgeDraft };
+        delete draft[draftKey];
+        state.coachEdgeDraft = draft;
+        render();
+      }, 0);
     });
   });
   root.querySelectorAll(".num-scroll-list").forEach((list) => {
@@ -1721,7 +1759,43 @@ function coachSetDay(idx, typeKey, km) {
   const cfg = SESSION_TYPES[typeKey];
   const finalKm = cfg.type === "rest" ? 0 : km || 8;
   const key = (state.coachWeekIndex || 0) + "-" + idx;
-  acc.profile.dayOverrides[key] = { ...cfg, km: finalKm, dist: cfg.type === "rest" ? "—" : finalKm + " km" };
+  // se preservan los overrides de entrada/vuelta que ya se hubieran cargado para este día,
+  // así cambiar el tipo o el km total no los borra.
+  const prev = acc.profile.dayOverrides[key] || {};
+  acc.profile.dayOverrides[key] = {
+    ...cfg,
+    km: finalKm,
+    dist: cfg.type === "rest" ? "—" : finalKm + " km",
+    warmupKmOverride: prev.warmupKmOverride,
+    cooldownKmOverride: prev.cooldownKmOverride,
+    // el día base puede haber sido CACO (isCaco/cacoRunMin/etc. en el objeto original) —
+    // si el nuevo tipo no es CACO hay que limpiar esos campos explícitamente, si no el
+    // merge con el día base los deja pegados y la sesión se sigue viendo como CACO.
+    isCaco: cfg.isCaco || false,
+    cacoRunMin: cfg.cacoRunMin,
+    cacoWalkMin: cfg.cacoWalkMin,
+    cacoReps: cfg.cacoReps,
+  };
+  saveAccounts(accounts);
+  render();
+}
+
+function coachSetEdge(idx, part, value) {
+  const accounts = loadAccounts();
+  const acc = accounts[state.selectedAthleteEmail];
+  if (!acc) return;
+  const key = (state.coachWeekIndex || 0) + "-" + idx;
+  let existing = acc.profile.dayOverrides[key];
+  if (!existing) {
+    // todavía no se había tocado el tipo/km de este día — se crea un override a partir
+    // del valor que ya tiene calculado el plan, para no perder nada.
+    const m = computeRenderModel(acc.profile, state.coachWeekIndex || 0);
+    const day = m.planDays[idx];
+    const cfg = SESSION_TYPES[day.typeKey] || SESSION_TYPES.easy;
+    existing = { ...cfg, km: day.km, dist: cfg.type === "rest" ? "—" : day.km + " km" };
+  }
+  existing[part] = value;
+  acc.profile.dayOverrides[key] = existing;
   saveAccounts(accounts);
   render();
 }
