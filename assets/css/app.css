@@ -1697,6 +1697,110 @@ button {
   }
 }
 
+.race-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.race-add-row .ob-select {
+  width: auto;
+  min-width: 84px;
+}
+.race-add-row .pb-segments {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.race-add-row .pb-segments input {
+  width: 40px;
+  text-align: center;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 4px;
+  color: var(--text);
+  font-weight: 700;
+}
+.race-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.race-entry {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.race-date-badge {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.race-date-badge .rd-day {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.race-date-badge .rd-month {
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+}
+.race-entry-body {
+  flex: 1;
+  min-width: 0;
+}
+.race-entry-title {
+  font-size: 14px;
+  font-weight: 800;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.race-entry-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.race-entry-stats span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.race-del-btn {
+  all: unset;
+  cursor: pointer;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+.race-del-btn:hover {
+  color: var(--bad);
+  background: var(--surface);
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .app-shell {

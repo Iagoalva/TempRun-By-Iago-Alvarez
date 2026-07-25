@@ -21,6 +21,10 @@ const ICONS = {
   mountain: `<svg viewBox="0 0 24 24" width="19" height="19"><path d="M3 19 9.5 7l3.2 5.6L15 9l6 10z" fill="var(--accent)" stroke="var(--accent)" stroke-width="1.2" stroke-linejoin="round"/></svg>`,
   trophy: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 4h10v4a5 5 0 0 1-10 0V4z" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M12 13v3M9 20h6M10 20v-2.5h4V20" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`,
   trendUp: `<svg viewBox="0 0 24 24" width="16" height="16" style="flex:none;margin-top:1px;"><path d="M3 17 9.5 10.5 14 15l7-8" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 7h5v5" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  pin: `<svg viewBox="0 0 24 24" width="13" height="13"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z" fill="none" stroke="var(--accent)" stroke-width="1.6"/><circle cx="12" cy="9.5" r="2.2" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`,
+  clock: `<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="8.5" fill="none" stroke="var(--good)" stroke-width="1.6"/><path d="M12 7.5V12l3 2" fill="none" stroke="var(--good)" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+  paceIcon: `<svg viewBox="0 0 24 24" width="13" height="13"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="var(--accent)"/></svg>`,
+  raceClose: `<svg viewBox="0 0 24 24" width="13" height="13"><path d="M5 5l14 14M19 5 5 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
 };
 function sessionIcon(typeTag) {
   return typeTag === "CUESTAS" ? ICONS.mountain : ICONS.lightning;
@@ -87,6 +91,7 @@ function defaultProfileState() {
     ],
     coachReadCount: 3,
     onboardingDone: false,
+    raceLog: [], // [{ id, distKey: "p3k"|"p5k"|"p10k", date: "YYYY-MM-DD", timeSec }]
   };
 }
 
@@ -130,6 +135,12 @@ let state = {
   toolH: "",
   toolM: "",
   toolS: "",
+  // formulario de carga de carreras (registro cronológico), no persistido hasta agregar
+  raceFormDist: "p5k",
+  raceFormDate: "",
+  raceFormH: "",
+  raceFormM: "",
+  raceFormS: "",
   // custom date picker
 
   openDatePicker: null, // bind path currently open, or null
@@ -1049,6 +1060,56 @@ function renderMyMarks(s) {
     </div>`;
 }
 
+function raceEntryHtml(e) {
+  const dist = MARK_DISTS.find((m) => m.key === e.distKey) || MARK_DISTS[1];
+  const km = dist.distM / 1000;
+  const paceSec = e.timeSec / km;
+  const d = new Date(e.date + "T00:00:00");
+  const dayNum = isNaN(d) ? "—" : d.getDate();
+  const monthAbbr = isNaN(d) ? "" : MONTH_NAMES[d.getMonth()].slice(0, 3).toUpperCase();
+  return `
+    <div class="race-entry">
+      <div class="race-date-badge">
+        <div class="rd-day">${dayNum}</div>
+        <div class="rd-month">${monthAbbr}</div>
+      </div>
+      <div class="race-entry-body">
+        <div class="race-entry-title">${dist.label}</div>
+        <div class="race-entry-stats">
+          <span>${ICONS.pin} ${km} km</span>
+          <span>${ICONS.clock} ${formatRaceTime(e.timeSec)}</span>
+          <span>${ICONS.paceIcon} ${formatRaceTime(paceSec)} /km</span>
+        </div>
+      </div>
+      <button class="race-del-btn" data-action="deleteRaceEntry" data-id="${e.id}" title="Eliminar">${ICONS.raceClose}</button>
+    </div>`;
+}
+
+function renderRaceLog(s) {
+  const entries = [...(s.raceLog || [])].sort((a, b) => (a.date < b.date ? 1 : -1));
+  return `
+    <div class="perfil-panel" style="margin-bottom:22px;">
+      <div class="perfil-panel-heading">${ICONS.trophy} ÚLTIMAS CARRERAS</div>
+      <div class="race-add-row">
+        <select class="ob-select" data-bind="raceFormDist">
+          ${MARK_DISTS.map((m) => `<option value="${m.key}" ${state.raceFormDist === m.key ? "selected" : ""}>${m.label}</option>`).join("")}
+        </select>
+        ${renderDatePicker("raceFormDate", state.raceFormDate, { maxYear: new Date().getFullYear(), minYear: new Date().getFullYear() - 10, defaultYear: new Date().getFullYear() })}
+        <div class="pb-segments" style="opacity:1;">
+          <input data-bind="raceFormH" placeholder="H" inputmode="numeric" maxlength="2" value="${esc(state.raceFormH)}">
+          <span>:</span>
+          <input data-bind="raceFormM" placeholder="M" inputmode="numeric" maxlength="2" value="${esc(state.raceFormM)}">
+          <span>:</span>
+          <input data-bind="raceFormS" placeholder="S" inputmode="numeric" maxlength="2" value="${esc(state.raceFormS)}">
+        </div>
+        <button class="btn-accent" style="width:auto;padding:11px 18px;margin:0;" data-action="addRaceEntry">Agregar carrera</button>
+      </div>
+      <div class="race-log-list">
+        ${entries.length ? entries.map(raceEntryHtml).join("") : `<div style="font-size:12.5px;color:var(--muted);padding:6px 2px;">Todavía no cargaste carreras. Agregá la fecha, distancia y tiempo de tu última carrera.</div>`}
+      </div>
+    </div>`;
+}
+
 function renderPerfil() {
   const s = state.profile;
   const age = ageFromBirthdate(s.birthdate);
@@ -1110,6 +1171,7 @@ function renderPerfil() {
     </div>
 
     ${renderMyMarks(s)}
+    ${renderRaceLog(s)}
 
     <div class="perfil-grid">
       <div class="perfil-panel">
@@ -1660,6 +1722,33 @@ const ACTIONS = {
   pbToggleNone: (el) => {
     const key = el.dataset.pb;
     setProfile((p) => ({ pbs: { ...p.pbs, [key]: p.pbs[key] === "NONE" ? "" : "NONE" } }));
+  },
+  addRaceEntry: () => {
+    const h = parseInt(state.raceFormH, 10) || 0;
+    const m = parseInt(state.raceFormM, 10) || 0;
+    const sec = parseInt(state.raceFormS, 10) || 0;
+    const timeSec = h * 3600 + m * 60 + sec;
+    if (!state.raceFormDate || timeSec <= 0) return;
+    const distKey = state.raceFormDist;
+    const entry = { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), distKey, date: state.raceFormDate, timeSec };
+    setProfile((p) => {
+      const prevSec = parseTime(p.pbs[distKey] === "NONE" ? "" : p.pbs[distKey]);
+      // la carrera cargada actualiza el PB de esa distancia solo si es una marca mejor
+      // (o si todavía no había ninguna) — nunca empeora un PB ya cargado.
+      const isNewBest = prevSec <= 0 || timeSec < prevSec;
+      const h2 = Math.floor(timeSec / 3600),
+        m2 = Math.floor((timeSec % 3600) / 60),
+        s2 = timeSec % 60;
+      return {
+        raceLog: [...(p.raceLog || []), entry],
+        pbs: isNewBest ? { ...p.pbs, [distKey]: `${h2}:${String(m2).padStart(2, "0")}:${String(s2).padStart(2, "0")}` } : p.pbs,
+      };
+    });
+    setState({ raceFormDate: "", raceFormH: "", raceFormM: "", raceFormS: "" });
+  },
+  deleteRaceEntry: (el) => {
+    const id = el.dataset.id;
+    setProfile((p) => ({ raceLog: (p.raceLog || []).filter((r) => r.id !== id) }));
   },
   goTab: (el) => setState({ athleteTab: el.dataset.tab, selectedDayIdx: null, expandedKey: null }),
   setTheme: (el) => setState({ theme: el.dataset.theme }),
