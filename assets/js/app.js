@@ -146,12 +146,8 @@ function defaultProfileState() {
     stravaStatus: "disconnected",
     stravaConnectedAt: null,
     stravaActivities: {}, // { [weekIndex-dayIndex]: { km, durationMin, pace, syncedAt } }
-    chatMessages: [
-      { from: "coach", text: "Vamos bien. Cualquier cosa, escribime.", time: "09:14" },
-      { from: "athlete", text: "Dale, el fartlek de mañana lo hago a la tarde ¿va bien?", time: "09:20" },
-      { from: "coach", text: "Perfecto, mejor con más descanso. Avisame cómo te sentís.", time: "09:22" },
-    ],
-    coachReadCount: 3,
+    chatMessages: [],
+    coachReadCount: 0,
     onboardingDone: false,
     raceLog: [], // [{ id, distKey: "p3k"|"p5k"|"p10k", date: "YYYY-MM-DD", timeSec }]
   };
@@ -190,6 +186,7 @@ let state = {
   coachWeekIndex: 0,
   coachExpandedKey: null,
   coachChatInput: "",
+  coachKmDraft: {}, // { [dayIdx]: texto tal cual lo está tipeando el coach, para no reformatear a mitad de tipeo }
   stravaJustSynced: false,
   // herramientas calculators (local, not persisted)
   toolDistance: "5000",
@@ -1051,18 +1048,22 @@ function renderChatTab() {
   return `
     <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Chat con Iago</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:18px;">Chat directo con tu coach.</div>
-    <div class="chat-box">
-      ${s.chatMessages
-        .map(
-          (msg) => `
+    <div class="chat-box${s.chatMessages.length === 0 ? " empty" : ""}">
+      ${
+        s.chatMessages.length === 0
+          ? `<div class="chat-empty-msg">Todavía no hay mensajes. Escribile a tu coach.</div>`
+          : s.chatMessages
+              .map(
+                (msg) => `
         <div class="chat-bubble-row" style="justify-content:${msg.from === "athlete" ? "flex-end" : "flex-start"}">
           <div class="chat-bubble" style="background:${msg.from === "athlete" ? "var(--accent)" : "var(--surface2)"};color:${msg.from === "athlete" ? "var(--accent-ink)" : "var(--text)"}">
             <div class="msg-text">${esc(msg.text)}</div>
             <div class="msg-time">${msg.time}</div>
           </div>
         </div>`
-        )
-        .join("")}
+              )
+              .join("")
+      }
     </div>
     <div class="chat-input-row">
       <input placeholder="Escribí un mensaje..." data-bind="chatInput" value="${esc(state.chatInput)}" data-enter-action="sendMessage">
@@ -1541,18 +1542,22 @@ function renderCoachDetail() {
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
       <div style="font-size:15px;font-weight:800;margin-bottom:14px;">Chat con ${esc((profile.fullName || "el atleta").split(" ")[0])}</div>
-      <div class="chat-box" style="min-height:auto;max-height:280px;overflow-y:auto;">
-        ${profile.chatMessages
-          .map(
-            (msg) => `
+      <div class="chat-box${profile.chatMessages.length === 0 ? " empty" : ""}" style="min-height:auto;max-height:180px;overflow-y:auto;">
+        ${
+          profile.chatMessages.length === 0
+            ? `<div class="chat-empty-msg">Todavía no hay mensajes con este atleta.</div>`
+            : profile.chatMessages
+                .map(
+                  (msg) => `
           <div class="chat-bubble-row" style="justify-content:${msg.from === "athlete" ? "flex-start" : "flex-end"}">
             <div class="chat-bubble" style="background:${msg.from === "athlete" ? "var(--surface2)" : "var(--accent)"};color:${msg.from === "athlete" ? "var(--text)" : "var(--accent-ink)"}">
               <div class="msg-text">${esc(msg.text)}</div>
               <div class="msg-time">${msg.time}</div>
             </div>
           </div>`
-          )
-          .join("")}
+                )
+                .join("")
+        }
       </div>
       <div class="chat-input-row">
         <input placeholder="Responderle..." data-bind="coachChatInput" value="${esc(state.coachChatInput)}" data-enter-action="coachSendMessage">
@@ -1590,7 +1595,7 @@ function renderCoachDetail() {
               <select data-action="coachSetDayType" data-idx="${d.i}" data-km="${d.kmDisplay}" style="flex:1;min-width:150px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:600;">
                 ${PLAN_TYPE_OPTIONS.map(([v, l]) => `<option value="${v}" ${d.typeKey === v ? "selected" : ""}>${l}</option>`).join("")}
               </select>
-              <input type="number" data-action="coachSetDayKm" data-idx="${d.i}" data-typekey="${d.typeKey}" value="${d.kmDisplay}" style="width:70px;flex:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:700;">
+              <input type="text" inputmode="decimal" data-action="coachSetDayKm" data-idx="${d.i}" data-typekey="${d.typeKey}" value="${state.coachKmDraft[d.i] != null ? state.coachKmDraft[d.i] : d.kmDisplay}" style="width:70px;flex:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:700;">
               <span style="font-size:11px;color:var(--muted);width:22px;flex:none;">km</span>
               ${
                 d.hasSession
@@ -1687,7 +1692,20 @@ function bindDynamicListeners() {
   });
   root.querySelectorAll('[data-action="coachSetDayKm"]').forEach((el) => {
     el.addEventListener("input", () => {
-      coachSetDay(parseInt(el.dataset.idx, 10), el.dataset.typekey, parseFloat(el.value) || 0);
+      const idx = parseInt(el.dataset.idx, 10);
+      // guardamos el texto tal cual se está tipeando (borrador) para que el render no lo
+      // reformatee a mitad de tipeo — ej. al escribir "3," antes de llegar a "3,5"
+      state.coachKmDraft = { ...state.coachKmDraft, [idx]: el.value };
+      // acepta coma o punto como separador decimal (teclados en español escriben ",")
+      const normalized = el.value.replace(",", ".");
+      coachSetDay(idx, el.dataset.typekey, parseFloat(normalized) || 0);
+    });
+    el.addEventListener("blur", () => {
+      const idx = parseInt(el.dataset.idx, 10);
+      const draft = { ...state.coachKmDraft };
+      delete draft[idx];
+      state.coachKmDraft = draft;
+      render();
     });
   });
   root.querySelectorAll(".num-scroll-list").forEach((list) => {
