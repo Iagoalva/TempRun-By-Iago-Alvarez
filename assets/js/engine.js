@@ -5,6 +5,7 @@ const SESSION_TYPES = {
   rest: { type: "rest", workout: "Descanso" },
   easy: { type: "easy", workout: "Rodaje suave" },
   fartlek: { type: "hard", workout: "Fartlek" },
+  cuestas: { type: "hard", workout: "Cuestas fuerza-resistencia" },
   series: { type: "hard", workout: "Series 6x1000m" },
   ritmo: { type: "hard", workout: "Ritmo de carrera" },
   long: { type: "long", workout: "Fondo largo" },
@@ -82,6 +83,34 @@ function computeVdot(pbs) {
     if (v >= 15 && v <= 85) return v;
   }
   return null;
+}
+// Clasifica el VDOT en un nivel de referencia para mostrarle al atleta dónde está parado.
+function vdotTier(vdot) {
+  if (vdot == null) return null;
+  if (vdot >= 70) return "ELITE";
+  if (vdot >= 55) return "AVANZADO";
+  if (vdot >= 40) return "INTERMEDIO";
+  return "PRINCIPIANTE";
+}
+// Inversa de vdotFromPerf: busca por bisección el tiempo (seg) para una distancia dada
+// que corresponde a un VDOT objetivo — se usa para proyectar el "tiempo potencial".
+function raceTimeFromVdot(vdot, distM) {
+  let lo = 60,
+    hi = 6 * 3600;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    const v = vdotFromPerf(distM, mid);
+    if (v > vdot) lo = mid;
+    else hi = mid;
+  }
+  return Math.round((lo + hi) / 2);
+}
+function formatRaceTime(totalSec) {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = Math.round(totalSec % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 // Sin VDOT (sin marca cargada), no hay ritmos objetivo: todos los campos vuelven null
 // y las sesiones se guían solo por zona de FC y sensación ("A sensación").
@@ -303,6 +332,7 @@ function reverseTypeKey(d) {
   if (d.type === "easy") return "easy";
   if (d.type === "long") return "long";
   if (d.workout.toLowerCase().includes("fartlek")) return "fartlek";
+  if (d.workout.toLowerCase().includes("cuestas")) return "cuestas";
   if (d.workout.toLowerCase().includes("ritmo de carrera")) return "ritmo";
   return "series";
 }
@@ -381,7 +411,9 @@ function buildWeekDays(weekMeta, availability, paces, level, distInfo) {
     if (qualityDays.includes(k)) {
       if (weekMeta.phaseKey === "specific") return { day: k, workout: "Ritmo de carrera", dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
       if (programType === "bridge") return { day: k, workout: "Fartlek suave", dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
-      if (weekMeta.phaseKey === "base") return { day: k, workout: "Fartlek", dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
+      // en fase Base el trabajo de calidad es de cuestas: fuerza-resistencia y técnica de
+      // brazada/pierna en pendiente, antes de meter series a ritmo en Desarrollo/Específico.
+      if (weekMeta.phaseKey === "base") return { day: k, workout: "Cuestas fuerza-resistencia", dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
       const reps = { Inicial: 4, "Principiante Bajo": 5, Principiante: 6, Intermedio: 8 }[level] || 6;
       const distEach = 800;
       return { day: k, workout: `Series ${reps}x${distEach}m`, dist: perQualityKm + " km", km: perQualityKm, type: "hard" };
@@ -442,6 +474,30 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
       { label: "PRINCIPAL", name: `${reps} x ${distEach}m`, dist: mainKm.toFixed(1) + "km", pace: pc(repPace), zone: "Z4", fc: karvonen(0.8, 0.9, fcRest, fcMax), time: reps * 2 + " min", desc: hasPaces ? `${reps} repeticiones a ritmo VDOT con ${Math.max(60, 180 - reps * 10)}s de trote suave entre series.` : `${reps} repeticiones a esfuerzo alto (a sensación) con ${Math.max(60, 180 - reps * 10)}s de trote suave entre series.` },
       { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: restKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "8 min", desc: "Trote regenerativo + estiramiento." },
     ];
+  } else if (d.workout.toLowerCase().includes("cuestas")) {
+    const rawMainKm = Math.max(0.4, km - 3.5);
+    // mínimo 4 repeticiones para que la sesión tenga sentido técnico — si el volumen de la
+    // semana da menos, el total de la sesión se ajusta hacia arriba en vez de mostrar
+    // reps y distancia inconsistentes entre sí.
+    const cuestaReps = Math.max(4, Math.round(rawMainKm / 0.4));
+    const mainKm = Math.round(cuestaReps * 0.4 * 100) / 100;
+    const totalKm = Math.round((2 + mainKm + 1.5) * 10) / 10;
+    typeTag = "CUESTAS";
+    title = `CUESTAS FUERZA-RESISTENCIA (X${cuestaReps}) (${totalKm} KM)`;
+    blocks = [
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: "2km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "8 min", desc: "Trote suave + movilidad articular." },
+      {
+        label: "PRINCIPAL",
+        name: "Potencia muscular",
+        dist: mainKm.toFixed(2) + "km",
+        pace: "A tope",
+        zone: "Neuro",
+        fc: karvonen(0.8, 0.9, fcRest, fcMax),
+        time: Math.round(cuestaReps * 0.75) + " min",
+        desc: `${cuestaReps} x 200m en subida (pendiente 5-8%). Foco en técnica de braceo y empuje. Recuperación: bajar trotando muy suave (200m).`,
+      },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1.5km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "5 min", desc: "Caminata o trote regenerativo." },
+    ];
   } else if (d.workout.toLowerCase().includes("fartlek")) {
     const isSoft = d.workout.toLowerCase().includes("suave");
     typeTag = isSoft ? "FARTLEK SUAVE" : "FARTLEK";
@@ -496,6 +552,6 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
       { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: "1km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: "5 min", desc: "Caminata + estiramiento suave." },
     ];
   }
-  blocks = blocks.map((b) => ({ ...b, zoneColor: b.zone.includes("1") ? "var(--muted)" : "var(--good)" }));
+  blocks = blocks.map((b) => ({ ...b, zoneColor: b.zone.includes("1") ? "var(--muted)" : b.zone.toLowerCase() === "neuro" ? "var(--pink)" : "var(--good)" }));
   return { typeTag, title, blocks };
 }

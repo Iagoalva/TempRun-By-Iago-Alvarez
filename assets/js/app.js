@@ -18,7 +18,13 @@ const ICONS = {
   people: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="9" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 20c0-2.2 1-4 3.5-4.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`,
   refresh: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-.8 12.1a2 2 0 0 1-2 1.9H9.8a2 2 0 0 1-2-1.9L7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  mountain: `<svg viewBox="0 0 24 24" width="19" height="19"><path d="M3 19 9.5 7l3.2 5.6L15 9l6 10z" fill="var(--accent)" stroke="var(--accent)" stroke-width="1.2" stroke-linejoin="round"/></svg>`,
+  trophy: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 4h10v4a5 5 0 0 1-10 0V4z" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M12 13v3M9 20h6M10 20v-2.5h4V20" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`,
+  trendUp: `<svg viewBox="0 0 24 24" width="16" height="16" style="flex:none;margin-top:1px;"><path d="M3 17 9.5 10.5 14 15l7-8" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 7h5v5" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
+function sessionIcon(typeTag) {
+  return typeTag === "CUESTAS" ? ICONS.mountain : ICONS.lightning;
+}
 
 const ACCOUNTS_KEY = "temprun_accounts";
 const SESSION_KEY = "temprun_session";
@@ -30,6 +36,7 @@ const PLAN_TYPE_OPTIONS = [
   ["rest", "Descanso"],
   ["easy", "Rodaje suave"],
   ["fartlek", "Fartlek"],
+  ["cuestas", "Cuestas fuerza-resistencia"],
   ["series", "Series"],
   ["ritmo", "Ritmo de carrera"],
   ["long", "Fondo largo"],
@@ -779,7 +786,7 @@ function renderSessionBody(d, expandedForced) {
     <div class="today-body">
       <div class="today-top">
         <div class="session-row-left">
-          <div class="today-icon">${ICONS.lightning}</div>
+          <div class="today-icon">${sessionIcon(d.sessionInfo.typeTag)}</div>
           <div>
             <div class="tag-row">
               <span class="tag-solid">${d.sessionInfo.phaseTag}</span>
@@ -869,7 +876,7 @@ function renderPlan(m) {
             <div class="week-day-card">
               <div class="session-row" data-action="toggleExpand" data-key="${d.key}">
                 <div class="session-row-left">
-                  <div class="today-icon">${ICONS.lightning}</div>
+                  <div class="today-icon">${sessionIcon(d.sessionInfo.typeTag)}</div>
                   <div>
                     <div class="tag-row">
                       <span class="tag-solid">${d.sessionInfo.phaseTag}</span>
@@ -993,6 +1000,55 @@ function renderToolsTab() {
     </div>`;
 }
 
+const MARK_DISTS = [
+  { key: "p3k", label: "3K", distM: 3000 },
+  { key: "p5k", label: "5K", distM: 5000 },
+  { key: "p10k", label: "10K", distM: 10000 },
+];
+
+function renderMyMarks(s) {
+  const marks = MARK_DISTS.map(({ key, label, distM }) => {
+    const pbStr = s.pbs[key];
+    const sec = parseTime(pbStr);
+    if (!pbStr || pbStr === "NONE" || sec <= 0) return { label, hasPb: false };
+    const vdot = vdotFromPerf(distM, sec);
+    const tier = vdotTier(vdot);
+    const potentialSec = raceTimeFromVdot(Math.min(85, vdot + 4), distM);
+    return { label, hasPb: true, pbFormatted: formatRaceTime(sec), vdot, tier, potential: formatRaceTime(potentialSec) };
+  });
+  return `
+    <div class="perfil-panel" style="margin-bottom:22px;">
+      <div class="perfil-panel-heading">${ICONS.trophy} MIS MARCAS PERSONALES</div>
+      <div style="font-size:11px;color:var(--muted);margin:-12px 0 16px;letter-spacing:0.3px;">NIVEL VDOT · DANIELS RUNNING FORMULA</div>
+      <div class="marks-grid">
+        ${marks
+          .map((m) =>
+            m.hasPb
+              ? `
+          <div class="mark-card">
+            <div class="mark-card-top"><span class="mark-dist">${m.label}</span><span class="mark-badge">${m.tier}</span></div>
+            <div class="mark-pb-label">PB ACTUAL</div>
+            <div class="mark-pb-value">${m.pbFormatted}</div>
+            <div class="mark-vdot">VDOT ${Math.round(m.vdot)}</div>
+            <div class="mark-divider"></div>
+            <div class="mark-pot-label">POTENCIAL (4 MESES)</div>
+            <div class="mark-pot-value">${m.potential}</div>
+            <div class="mark-pot-sub">+4 PUNTOS VDOT</div>
+          </div>`
+              : `
+          <div class="mark-card empty">
+            <div>
+              <div class="mark-empty-dist">${m.label}</div>
+              <div class="mark-empty-label">SIN MARCA</div>
+            </div>
+          </div>`
+          )
+          .join("")}
+      </div>
+      <div class="mark-tip">${ICONS.trendUp} Con entrenamiento constante de <b>4-5 días semanales</b> y un plan periodizado, podés mejorar tu VDOT entre 3 y 6 puntos en 4 meses. Eso equivale a los tiempos mostrados arriba.</div>
+    </div>`;
+}
+
 function renderPerfil() {
   const s = state.profile;
   const age = ageFromBirthdate(s.birthdate);
@@ -1052,6 +1108,8 @@ function renderPerfil() {
              <div class="strava-desc" style="margin:12px 0 0;">Simulación: te trae tu próxima sesión pendiente del plan y le carga un ritmo y tiempo reales, como haría una sincronización real de Strava.</div>`
       }
     </div>
+
+    ${renderMyMarks(s)}
 
     <div class="perfil-grid">
       <div class="perfil-panel">

@@ -1589,6 +1589,114 @@ button {
   padding: 8px 12px;
 }
 
+.marks-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.mark-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  min-height: 150px;
+}
+.mark-card.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mark-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.mark-dist {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  letter-spacing: 0.4px;
+}
+.mark-badge {
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+.mark-pb-label,
+.mark-pot-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+.mark-pb-value {
+  font-size: 22px;
+  font-weight: 800;
+  font-style: italic;
+}
+.mark-vdot {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-top: 4px;
+}
+.mark-divider {
+  border-top: 1px solid var(--border);
+  margin: 12px 0 10px;
+}
+.mark-pot-value {
+  font-size: 17px;
+  font-weight: 800;
+  font-style: italic;
+  color: var(--good);
+}
+.mark-pot-sub {
+  font-size: 9.5px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.mark-empty-dist {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--border);
+  letter-spacing: 0.4px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+.mark-empty-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+}
+.mark-tip {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.mark-tip b {
+  color: var(--accent);
+}
+@media (max-width: 700px) {
+  .marks-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .app-shell {
