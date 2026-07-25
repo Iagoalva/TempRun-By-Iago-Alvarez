@@ -542,7 +542,7 @@ function renderOnboarding() {
         ${questionHtml("q1", "¿Corrés actualmente de forma regular?", [["si", "Sí"], ["no", "No"]], s)}
         ${questionHtml("q2", "¿Hace cuánto corrés de forma continua?", [["nunca", "Nunca"], ["menos6", "< 6 meses"], ["mas6", "+ 6 meses"]], s)}
         ${questionHtml("q3", "¿Cuántos km corrés por semana en promedio?", [["cero", "0 km"], ["poco", "1-15 km"], ["mas15", "+15 km"]], s)}
-        ${questionHtml("q4", "¿Podés correr 30 minutos seguidos sin parar a caminar?", [["no", "No"], ["esfuerzo", "Con esfuerzo"], ["comodo", "Sí, cómodo"]], s)}
+        ${questionHtml("q4", "¿Cuántos minutos podés correr seguido, sin parar a caminar, hoy en día?", [["no", "No puedo correr sin parar"], ["menos20", "Menos de 20 min"], ["20a35", "20 a 35 min"], ["mas35", "Más de 35 min"]], s)}
         ${questionHtml("q5", "¿Entrenaste alguna vez con un plan o corriste una carrera oficial?", [["si", "Sí"], ["no", "No"]], s)}
         ${questionHtml("q6", "¿Cuándo corriste por última vez de forma regular?", [["nunca", "Nunca corrí regular"], ["mas6", "Hace + 6 meses"], ["menos6", "Hace - 6 meses"], ["activo", "Corro activamente ahora"]], s)}
         ${questionHtml("q7", "¿Tuviste alguna lesión reciente que te haya limitado?", [["limitante", "Sí, todavía me limita"], ["recuperado", "Sí, ya recuperado/a"], ["no", "No"]], s)}
@@ -650,7 +650,8 @@ function computeRenderModel(profile, weekIndexParam) {
   const weekIndex = Math.max(0, Math.min(macro.totalWeeks - 1, weekIndexRaw));
   const weekMeta = macro.weeks[weekIndex];
 
-  const rawDaysBase = buildWeekDays(weekMeta, s.availability, paces, level, distInfo);
+  const alreadyRunsMin = continuousMinFromAnswers(s.levelAnswers);
+  const rawDaysBase = buildWeekDays(weekMeta, s.availability, paces, level, distInfo, alreadyRunsMin);
   const rawDays = rawDaysBase.map((d, i) => {
     const ov = s.dayOverrides[weekIndex + "-" + i];
     return ov ? { ...d, ...ov } : d;

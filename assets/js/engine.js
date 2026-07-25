@@ -158,11 +158,19 @@ const LEVEL_SCORE_WEIGHTS = {
   q1: { si: 15, no: 0 },
   q2: { nunca: 0, menos6: 8, mas6: 15 },
   q3: { cero: 0, poco: 8, mas15: 15 },
-  q4: { no: 0, esfuerzo: 10, comodo: 20 },
+  q4: { no: 0, menos20: 8, "20a35": 16, mas35: 20 },
   q5: { si: 10, no: 0 },
   q6: { nunca: 0, mas6: 3, menos6: 7, activo: 12 },
   q7: { limitante: -10, recuperado: 0, no: 5 },
 };
+// Minutos continuos que representa cada opción de q4 — se usa como piso real de duración
+// de las sesiones (nunca le prescribimos menos de lo que el atleta ya sostiene) y para
+// decidir si saltea el CACO aunque su nivel general dé Inicial/Principiante Bajo.
+const CONTINUOUS_MIN_BY_ANSWER = { no: 0, menos20: 10, "20a35": 20, mas35: 35 };
+const CACO_SKIP_THRESHOLD_MIN = 20;
+function continuousMinFromAnswers(a) {
+  return CONTINUOUS_MIN_BY_ANSWER[a && a.q4] || 0;
+}
 
 function levelScore(a) {
   let total = 0;
@@ -173,7 +181,7 @@ function levelScore(a) {
 }
 
 function levelFromAnswers(a) {
-  const isIntermedio = a.q2 === "mas6" && a.q3 === "mas15" && a.q4 === "comodo" && a.q7 !== "limitante";
+  const isIntermedio = a.q2 === "mas6" && a.q3 === "mas15" && a.q4 === "mas35" && a.q7 !== "limitante";
   if (isIntermedio) return "Intermedio";
   const score = levelScore(a);
   if (score <= 20) return "Inicial";
@@ -187,7 +195,7 @@ function levelAnswerWarnings(a) {
   const warns = [];
   if (a.q1 === "si" && a.q3 === "cero") warns.push("Dijiste que corrés de forma regular, pero marcaste 0 km semanales.");
   if (a.q1 === "no" && a.q3 === "mas15") warns.push("Dijiste que no corrés de forma regular, pero marcaste +15 km semanales.");
-  if (a.q4 === "comodo" && a.q3 === "cero") warns.push("Dijiste que sostenés 30 min cómodo, pero marcaste 0 km semanales.");
+  if ((a.q4 === "20a35" || a.q4 === "mas35") && a.q3 === "cero") warns.push("Dijiste que ya corrés varios minutos seguidos, pero marcaste 0 km semanales.");
   if (a.q6 === "activo" && a.q1 === "no") warns.push("Dijiste que corrés activamente ahora, pero también que no corrés de forma regular.");
   return warns;
 }
@@ -208,13 +216,19 @@ function weekAdherence(completed, weekIdx, trainDays) {
 // 'bridge' → semana puente al final del CACO de Inicial: rodajes + 1 fartlek suave, antes de Desarrollo
 // 'ramp'   → semanas de solo rodajes (sin sesión de calidad) antes del primer fartlek
 // 'normal' → estructura estándar de la fase
-function getWeekProgramType(level, phaseKey, weekInPhase, phaseWeeksTotal) {
+function getWeekProgramType(level, phaseKey, weekInPhase, phaseWeeksTotal, alreadyRunsMin) {
   if (phaseKey !== "base") return "normal";
+  // si el atleta ya sostiene 20+ minutos corridos, saltea el CACO aunque su nivel general
+  // (por poco volumen semanal, tiempo sin entrenar, etc.) diera Inicial/Principiante Bajo —
+  // arranca directo con el mismo patrón de solo-rodajes que usa Principiante.
+  const skipCaco = (alreadyRunsMin || 0) >= CACO_SKIP_THRESHOLD_MIN;
   if (level === "Inicial") {
+    if (skipCaco) return weekInPhase < RAMP_WEEKS_PRINCIPIANTE ? "ramp" : "normal";
     const bridgeStart = Math.max(0, phaseWeeksTotal - BRIDGE_WEEKS_INICIAL);
     return weekInPhase < bridgeStart ? "caco" : "bridge";
   }
   if (level === "Principiante Bajo") {
+    if (skipCaco) return weekInPhase < RAMP_WEEKS_PRINCIPIANTE ? "ramp" : "normal";
     return weekInPhase < CACO_SHORT_LEN ? "caco" : "ramp";
   }
   if (level === "Principiante") {
@@ -225,6 +239,7 @@ function getWeekProgramType(level, phaseKey, weekInPhase, phaseWeeksTotal) {
 
 function buildMacrocycle(s, paces, level) {
   const distInfo = parseGoalDistance(s.goalDistance);
+  const alreadyRunsMin = continuousMinFromAnswers(s.levelAnswers);
   const today = new Date();
   const goal = s.goalDate ? new Date(s.goalDate + "T00:00:00") : null;
   let totalWeeks = goal && goal > today ? Math.ceil((goal - today) / (7 * 24 * 3600 * 1000)) : 12;
@@ -266,7 +281,7 @@ function buildMacrocycle(s, paces, level) {
   for (let i = 0; i < totalWeeks; i++) {
     const phase = phaseList.find((p) => i >= p.start && i < p.end);
     const weekInPhase = i - phase.start;
-    const programType = getWeekProgramType(level, phase.key, weekInPhase, phase.weeks);
+    const programType = getWeekProgramType(level, phase.key, weekInPhase, phase.weeks, alreadyRunsMin);
     let isDeload = false;
     if (phase.key === "taper") {
       const pos = weekInPhase;
@@ -337,13 +352,16 @@ function reverseTypeKey(d) {
   return "series";
 }
 
-function buildWeekDays(weekMeta, availability, paces, level, distInfo) {
+function buildWeekDays(weekMeta, availability, paces, level, distInfo, alreadyRunsMin) {
   let avail = DAY_KEYS.filter((k) => availability[k]);
   if (avail.length === 0) avail = DAY_KEYS.slice();
   const longDay = avail[avail.length - 1];
   const programType = weekMeta.programType || "normal"; // 'caco' | 'bridge' | 'ramp' | 'normal'
   const isCacoPhase = programType === "caco";
   const isNovice = NOVICE_LEVELS.has(level);
+  // si el atleta ya declaró que sostiene X minutos corridos, nunca le prescribimos una
+  // sesión de rodaje/fondo más corta que eso — el piso sube en base a esos minutos.
+  const alreadyRunsKm = alreadyRunsMin ? Math.round((alreadyRunsMin / paceToMinutes(paces.easy)) * 10) / 10 : 0;
 
   let qCount;
   if (weekMeta.isLastTaperWeek || isCacoPhase || programType === "ramp") qCount = 0;
@@ -357,9 +375,9 @@ function buildWeekDays(weekMeta, availability, paces, level, distInfo) {
   // Piso mínimo absoluto por tipo de sesión — solo evita sesiones sin sentido (ej. 0.3km),
   // no es un objetivo de duración: por eso es bajo y no domina sobre el volumen semanal
   // que ya calculó la periodización (progresión, deload, tapering).
-  const longFloor = isNovice ? 2 : 3;
+  const longFloor = Math.max(isNovice ? 2 : 3, alreadyRunsKm);
   const qualityFloor = isNovice ? 1.5 : 2.5;
-  const easyFloor = isNovice ? 1.2 : 1.5;
+  const easyFloor = Math.max(isNovice ? 1.2 : 1.5, alreadyRunsKm);
   const longCapKm = Math.round(distInfo.km * 1.15 * 10) / 10;
   // Reparto por peso relativo (no por %fijo): el fondo largo pesa más que una sesión de
   // calidad, que a su vez pesa más que un rodaje — así el fondo largo sigue siendo la
