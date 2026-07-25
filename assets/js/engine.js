@@ -252,7 +252,9 @@ function buildMacrocycle(s, paces, level) {
       // pero seguimos subiendo el volumen un poco cada semana en vez de dejarlo plano
       const overflowWeeks = weekInPhase - (CACO_TABLE.length - 1);
       if (overflowWeeks > 0) cacoVol = Math.round(cacoVol * (1 + 0.03 * overflowWeeks) * 10) / 10;
-      current = cacoVol;
+      // el CACO también respeta el techo semanal configurado para el nivel: la progresión
+      // caminar-correr no puede superar el límite de seguridad de un principiante.
+      current = Math.min(range.max, cacoVol);
       peakVol = Math.max(peakVol, current);
     } else {
       sinceDeload++;
@@ -267,6 +269,7 @@ function buildMacrocycle(s, paces, level) {
         isDeload = true;
         current = current * 0.72;
         sinceDeload = 0;
+        adjustNote = "Semana de descarga programada — recuperación activa cada ciertas semanas de carga";
       } else if (i > 0) {
         const lowAdherence = prevAdherence !== null && prevAdherence < 0.85;
         const g = lowAdherence ? growth * 0.5 : growth;
@@ -319,16 +322,38 @@ function buildWeekDays(weekMeta, availability, paces, level, distInfo) {
   qCount = Math.min(qCount, Math.max(0, avail.length - 1));
 
   const qualityDays = avail.filter((d) => d !== longDay).slice(0, qCount);
-  const volume = weekMeta.volume;
-  const longFloor = isNovice ? 3 : 6;
-  const longKm = Math.min(Math.round(distInfo.km * 1.15 * 10) / 10, Math.max(longFloor, Math.round(volume * 0.28)));
-  const remainingAfterLong = Math.max(0, volume - longKm);
-  const qualityFloor = isNovice ? 2.5 : 5;
-  const perQualityKm = qCount > 0 ? Math.max(qualityFloor, Math.round(((remainingAfterLong * 0.35) / qCount) * 10) / 10) : 0;
   const easyDaysList = avail.filter((d) => d !== longDay && !qualityDays.includes(d));
-  const remainingForEasy = Math.max(0, remainingAfterLong - perQualityKm * qCount);
-  const easyFloor = isNovice ? 2 : 3;
-  const perEasyKm = easyDaysList.length > 0 ? Math.max(easyFloor, Math.round((remainingForEasy / easyDaysList.length) * 10) / 10) : 0;
+  const volume = weekMeta.volume;
+  // Piso mínimo absoluto por tipo de sesión — solo evita sesiones sin sentido (ej. 0.3km),
+  // no es un objetivo de duración: por eso es bajo y no domina sobre el volumen semanal
+  // que ya calculó la periodización (progresión, deload, tapering).
+  const longFloor = isNovice ? 2 : 3;
+  const qualityFloor = isNovice ? 1.5 : 2.5;
+  const easyFloor = isNovice ? 1.2 : 1.5;
+  const longCapKm = Math.round(distInfo.km * 1.15 * 10) / 10;
+  // Reparto por peso relativo (no por %fijo): el fondo largo pesa más que una sesión de
+  // calidad, que a su vez pesa más que un rodaje — así el fondo largo sigue siendo la
+  // sesión más exigente de la semana sin importar cuántos días de cada tipo haya.
+  const LONG_WEIGHT = 1.8,
+    QUALITY_WEIGHT = 1.3,
+    EASY_WEIGHT = 1;
+  let totalWeight = LONG_WEIGHT + QUALITY_WEIGHT * qCount + EASY_WEIGHT * easyDaysList.length;
+  let longKm = (volume * LONG_WEIGHT) / totalWeight;
+  if (longKm > longCapKm) {
+    // el fondo largo no debe superar ~15% más que la distancia objetivo de carrera;
+    // lo que sobra se reparte entre las demás sesiones de la semana.
+    longKm = longCapKm;
+    totalWeight -= LONG_WEIGHT;
+  }
+  longKm = Math.max(longFloor, Math.round(longKm * 10) / 10);
+  const remainingAfterLong = Math.max(0, volume - longKm);
+  const remWeight = QUALITY_WEIGHT * qCount + EASY_WEIGHT * easyDaysList.length;
+  let perQualityKm = 0,
+    perEasyKm = 0;
+  if (remWeight > 0) {
+    perQualityKm = qCount > 0 ? Math.max(qualityFloor, Math.round(((remainingAfterLong * QUALITY_WEIGHT) / remWeight) * 10) / 10) : 0;
+    perEasyKm = easyDaysList.length > 0 ? Math.max(easyFloor, Math.round(((remainingAfterLong * EASY_WEIGHT) / remWeight) * 10) / 10) : 0;
+  }
   const cacoCfg = isCacoPhase ? CACO_TABLE[Math.min(weekMeta.weekInPhase, CACO_TABLE.length - 1)] : null;
   const cacoWeekNum = isCacoPhase ? Math.min(weekMeta.weekInPhase + 1, CACO_TABLE.length) : 0;
 
@@ -363,11 +388,7 @@ function buildWeekDays(weekMeta, availability, paces, level, distInfo) {
     }
     return { day: k, workout: "Rodaje suave", dist: perEasyKm + " km", km: perEasyKm, type: "easy" };
   });
-  const easyMinPerKm = paceToMinutes(paces.easy);
-  const sessionMinFloor = isNovice ? 22 : 40;
-  const minKm = Math.max(2, Math.round((sessionMinFloor / easyMinPerKm) * 10) / 10);
-  const maxKm = Math.min(40, Math.round((120 / easyMinPerKm) * 10) / 10);
-  return days.map((d) => (d.type === "rest" || d.isCaco ? d : { ...d, km: Math.min(maxKm, Math.max(minKm, d.km)), dist: Math.min(maxKm, Math.max(minKm, d.km)) + " km" }));
+  return days;
 }
 
 function karvonen(lo, hi, fcRest, fcMax) {
