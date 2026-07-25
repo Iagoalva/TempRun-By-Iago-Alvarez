@@ -466,7 +466,10 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
   // recalcular el resto de la sesión con esos valores.
   function resolveEdge(override, fallback, cap) {
     if (override == null) return fallback;
-    return Math.max(0.1, Math.min(override, cap));
+    // solo se topea el máximo (nunca más que la parte principal) — no se fuerza un piso
+    // artificial hacia arriba, así un valor real como 0 (o un "0." a mitad de escribir
+    // "0,5") no salta a un número que el coach nunca tipeó.
+    return Math.max(0, Math.min(override, cap));
   }
   if (d.isCaco) {
     const zRun = karvonen(0.65, 0.78, fcRest, fcMax);

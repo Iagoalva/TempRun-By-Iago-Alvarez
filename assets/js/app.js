@@ -1732,7 +1732,11 @@ function bindDynamicListeners() {
       const draftKey = idx + "-" + part;
       state.coachEdgeDraft = { ...state.coachEdgeDraft, [draftKey]: el.value };
       const normalized = el.value.replace(",", ".");
-      coachSetEdge(idx, part, parseFloat(normalized) || 0.1);
+      const parsed = parseFloat(normalized);
+      // ojo: "|| 0.1" trataría un 0 tipeado a propósito (o un "0." a mitad de escribir "0.5")
+      // como inválido y lo pisaría con 0.1 — con isNaN solo cae a 0 cuando el campo
+      // todavía no tiene ningún número real (vacío, o solo un "-"/"." suelto).
+      coachSetEdge(idx, part, isNaN(parsed) ? 0 : parsed);
     });
     el.addEventListener("blur", () => {
       const idx = parseInt(el.dataset.idx, 10),
