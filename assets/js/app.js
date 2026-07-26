@@ -729,7 +729,7 @@ function computeRenderModel(profile, weekIndexParam) {
     const isRest = d.type === "rest";
     const barColor = d.type === "hard" ? "var(--bad)" : d.type === "long" ? "var(--accent)" : isRest ? "var(--muted)" : "var(--good)";
     const expanded = isOwn && state.expandedKey === key;
-    const sessionInfoRaw = isRest ? null : sessionBlocks(d, fcRest, fcMax, paces, distInfo);
+    const sessionInfoRaw = isRest ? null : sessionBlocks(d, fcRest, fcMax, paces, distInfo, level);
     const sessionInfo = sessionInfoRaw ? { ...sessionInfoRaw, phaseTag: weekMeta.phaseName.toUpperCase() + (weekMeta.isDeload ? " · DESCARGA" : "") } : null;
     return { ...d, key, i, done, isRest, hasSession: !isRest, barColor, expanded, sessionInfo, typeKey: reverseTypeKey(d) };
   });
