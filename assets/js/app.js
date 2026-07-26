@@ -187,7 +187,7 @@ let state = {
   coachExpandedKey: null,
   coachChatInput: "",
   coachKmDraft: {}, // { [dayIdx]: texto tal cual lo está tipeando el coach, para no reformatear a mitad de tipeo }
-  coachEdgeDraft: {}, // { "[dayIdx]-warmupKmOverride"|"[dayIdx]-cooldownKmOverride": texto tal cual se tipea }
+  coachEdgeDraft: {}, // { "[dayIdx]-warmupMinOverride"|"[dayIdx]-cooldownMinOverride": texto tal cual se tipea }
   stravaJustSynced: false,
   // herramientas calculators (local, not persisted)
   toolDistance: "5000",
@@ -956,30 +956,33 @@ function renderStravaActual(profile, key) {
 
 function renderBlocksGrid(sessionInfo, editDayIdx) {
   const blocks = sessionInfo.blocks || sessionInfo; // admite pasar blocks directo (uso de solo lectura)
-  const canEditEdges = editDayIdx != null && sessionInfo.warmupKm != null;
+  const canEditEdges = editDayIdx != null && sessionInfo.warmupMin != null;
   return `
     <div class="blocks-grid">
       ${blocks
         .map((b, i) => {
           const isEdge = i === 0 || i === blocks.length - 1;
           const editable = canEditEdges && isEdge;
-          const part = i === 0 ? "warmupKmOverride" : "cooldownKmOverride";
+          const part = i === 0 ? "warmupMinOverride" : "cooldownMinOverride";
           const draftKey = editDayIdx + "-" + part;
-          const rawVal = i === 0 ? sessionInfo.warmupKm : sessionInfo.cooldownKm;
-          const distCell = editable
-            ? `<input type="text" inputmode="decimal" data-action="coachSetEdge" data-idx="${editDayIdx}" data-part="${part}" value="${state.coachEdgeDraft[draftKey] != null ? state.coachEdgeDraft[draftKey] : rawVal}" style="width:100%;background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text);font-weight:800;font-size:13px;padding:0 0 2px;">`
-            : b.dist;
+          const rawVal = i === 0 ? sessionInfo.warmupMin : sessionInfo.cooldownMin;
+          // se edita el TIEMPO (minutos) de entrada/vuelta, no la distancia — así lo piensa
+          // un coach de verdad (Daniels: 10-15 min de entrada, sin importar el km total de
+          // la sesión) y se evita la matemática circular de derivar minutos desde km.
+          const timeCell = editable
+            ? `<input type="text" inputmode="decimal" data-action="coachSetEdge" data-idx="${editDayIdx}" data-part="${part}" value="${state.coachEdgeDraft[draftKey] != null ? state.coachEdgeDraft[draftKey] : rawVal}" style="width:44px;background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text);font-weight:800;font-size:13px;padding:0 0 2px;"> min`
+            : b.time;
           return `
         <div class="block-card">
           <div class="b-label">${b.label}</div>
           <div class="b-name">${b.name}</div>
           <div class="block-mini-grid">
-            <div class="block-mini"><div class="k">DIST</div><div class="v">${distCell}</div></div>
+            <div class="block-mini"><div class="k">DIST</div><div class="v">${b.dist}</div></div>
             <div class="block-mini"><div class="k">RITMO /KM</div><div class="v" style="color:var(--accent)">${b.pace}</div></div>
             <div class="block-mini"><div class="k">ZONA</div><div class="v" style="color:${b.zoneColor}">${b.zone}</div></div>
             <div class="block-mini"><div class="k">FC TARGET</div><div class="v" style="color:var(--pink)">${b.fc}</div></div>
           </div>
-          <div class="block-mini" style="margin-bottom:8px;"><div class="k">TIEMPO</div><div class="v">${b.time}</div></div>
+          <div class="block-mini" style="margin-bottom:8px;"><div class="k">TIEMPO</div><div class="v">${timeCell}</div></div>
           <div class="b-desc">${b.desc}</div>
         </div>`;
         })
@@ -1799,8 +1802,8 @@ function coachSetDay(idx, typeKey, km) {
     ...cfg,
     km: finalKm,
     dist: cfg.type === "rest" ? "—" : finalKm + " km",
-    warmupKmOverride: prev.warmupKmOverride,
-    cooldownKmOverride: prev.cooldownKmOverride,
+    warmupMinOverride: prev.warmupMinOverride,
+    cooldownMinOverride: prev.cooldownMinOverride,
     // el día base puede haber sido CACO (isCaco/cacoRunMin/etc. en el objeto original) —
     // si el nuevo tipo no es CACO hay que limpiar esos campos explícitamente, si no el
     // merge con el día base los deja pegados y la sesión se sigue viendo como CACO.

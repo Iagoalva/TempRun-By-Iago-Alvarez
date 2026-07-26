@@ -459,17 +459,17 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
   const pcRange = (a, b) => (hasPaces ? `${a}-${b}` : NO_PACE);
   const pcCombo = (a, b) => (hasPaces ? `${a}/${b}` : NO_PACE);
   const easyPaceMin = paceToMinutes(paces.easy);
-  const warmupOverride = d.warmupKmOverride;
-  const cooldownOverride = d.cooldownKmOverride;
-  // la entrada en calor y la vuelta a la calma nunca pueden superar la parte principal:
-  // se topean contra el "cap" (la parte principal, o una estimación de ella) antes de
-  // recalcular el resto de la sesión con esos valores.
-  function resolveEdge(override, fallback, cap) {
-    if (override == null) return fallback;
-    // solo se topea el máximo (nunca más que la parte principal) — no se fuerza un piso
-    // artificial hacia arriba, así un valor real como 0 (o un "0." a mitad de escribir
-    // "0,5") no salta a un número que el coach nunca tipeó.
-    return Math.max(0, Math.min(override, cap));
+  const warmupMinOverride = d.warmupMinOverride;
+  const cooldownMinOverride = d.cooldownMinOverride;
+  // Entrada en calor y vuelta a la calma se definen en MINUTOS (como recomienda cualquier
+  // guía de entrenamiento real — Daniels: 10-15 min de entrada sin importar el km total de
+  // la sesión) y no como fracción del kilometraje. El km que se muestra sale de convertir
+  // esos minutos con el ritmo suave del atleta. Se topea el máximo en km equivalente para
+  // que nunca superen a la parte principal, pero no se fuerza ningún piso hacia arriba.
+  function resolveEdgeMin(overrideMin, fallbackMin, capKm) {
+    const minutes = overrideMin == null ? fallbackMin : Math.max(0, overrideMin);
+    const km = minutes / easyPaceMin;
+    return { km: Math.min(km, capKm), min: Math.round(Math.min(km, capKm) * easyPaceMin) };
   }
   if (d.isCaco) {
     const zRun = karvonen(0.65, 0.78, fcRest, fcMax);
@@ -496,28 +496,31 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
   }
   const km = d.km;
   const mk = d.workout.match(/(\d+)x(\d+)m/);
-  let typeTag, title, blocks;
+  let typeTag, title, blocks, warmupMinResult, cooldownMinResult;
   if (mk) {
     const reps = parseInt(mk[1]),
       distEach = parseInt(mk[2]);
     const mainKm = (reps * distEach) / 1000;
-    const defaultRest = Math.max(0.5, (km - mainKm) / 2);
-    const warmupKm = resolveEdge(warmupOverride, defaultRest, mainKm);
-    const cooldownKm = resolveEdge(cooldownOverride, defaultRest, mainKm);
+    const w = resolveEdgeMin(warmupMinOverride, 12, mainKm);
+    const c = resolveEdgeMin(cooldownMinOverride, 8, mainKm);
+    const warmupKm = w.km,
+      cooldownKm = c.km;
     const repPace = distEach <= 400 ? paces.repetition : paces.interval;
     typeTag = "SERIES";
     title = `SERIES ${reps}X${distEach}M (${(Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10).toFixed(1)} KM)`;
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(warmupKm * easyPaceMin) + " min", desc: "Trote suave + movilidad articular + 4 progresiones." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: w.min + " min", desc: "Trote suave + movilidad articular + 4 progresiones." },
       { label: "PRINCIPAL", name: `${reps} x ${distEach}m`, dist: mainKm.toFixed(1) + "km", pace: pc(repPace), zone: "Z4", fc: karvonen(0.8, 0.9, fcRest, fcMax), time: reps * 2 + " min", desc: hasPaces ? `${reps} repeticiones a ritmo VDOT con ${Math.max(60, 180 - reps * 10)}s de trote suave entre series.` : `${reps} repeticiones a esfuerzo alto (a sensación) con ${Math.max(60, 180 - reps * 10)}s de trote suave entre series.` },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(cooldownKm * easyPaceMin) + " min", desc: "Trote regenerativo + estiramiento." },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: c.min + " min", desc: "Trote regenerativo + estiramiento." },
     ];
+    warmupMinResult = w.min;
+    cooldownMinResult = c.min;
   } else if (d.workout.toLowerCase().includes("cuestas")) {
-    const warmupDefault = 2,
-      cooldownDefault = 1.5;
-    const prelimMain = Math.max(0.4, km - warmupDefault - cooldownDefault);
-    const warmupKm = resolveEdge(warmupOverride, warmupDefault, prelimMain);
-    const cooldownKm = resolveEdge(cooldownOverride, cooldownDefault, prelimMain);
+    const prelimMain = Math.max(0.4, km - 10 / easyPaceMin - 8 / easyPaceMin);
+    const w = resolveEdgeMin(warmupMinOverride, 10, prelimMain);
+    const c = resolveEdgeMin(cooldownMinOverride, 8, prelimMain);
+    const warmupKm = w.km,
+      cooldownKm = c.km;
     const rawMainKm = Math.max(0.4, km - warmupKm - cooldownKm);
     // mínimo 4 repeticiones para que la sesión tenga sentido técnico — si el volumen de la
     // semana da menos, el total de la sesión se ajusta hacia arriba en vez de mostrar
@@ -528,7 +531,7 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
     typeTag = "CUESTAS";
     title = `CUESTAS FUERZA-RESISTENCIA (X${cuestaReps}) (${totalKm} KM)`;
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(warmupKm * easyPaceMin) + " min", desc: "Trote suave + movilidad articular." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: w.min + " min", desc: "Trote suave + movilidad articular." },
       {
         label: "PRINCIPAL",
         name: "Potencia muscular",
@@ -539,22 +542,26 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
         time: Math.round(cuestaReps * 0.75) + " min",
         desc: `${cuestaReps} x 200m en subida (pendiente 5-8%). Foco en técnica de braceo y empuje. Recuperación: bajar trotando muy suave (200m).`,
       },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(cooldownKm * easyPaceMin) + " min", desc: "Caminata o trote regenerativo." },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: c.min + " min", desc: "Caminata o trote regenerativo." },
     ];
+    warmupMinResult = w.min;
+    cooldownMinResult = c.min;
   } else if (d.workout.toLowerCase().includes("fartlek")) {
     const isSoft = d.workout.toLowerCase().includes("suave");
-    const warmupDefault = isSoft ? 1.5 : 2;
-    const cooldownDefault = 1.5;
     const cap = km / 3;
-    const warmupKm = resolveEdge(warmupOverride, warmupDefault, cap);
-    const cooldownKm = resolveEdge(cooldownOverride, cooldownDefault, cap);
+    const w = resolveEdgeMin(warmupMinOverride, isSoft ? 8 : 10, cap);
+    const c = resolveEdgeMin(cooldownMinOverride, 8, cap);
+    const warmupKm = w.km,
+      cooldownKm = c.km;
     const mainKm = Math.max(km - warmupKm - cooldownKm, 1);
     const totalKm = Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10;
     typeTag = isSoft ? "FARTLEK SUAVE" : "FARTLEK";
     title = isSoft ? `FARTLEK SUAVE · ADAPTACIÓN (${totalKm} KM)` : `FARTLEK (${totalKm} KM)`;
+    warmupMinResult = w.min;
+    cooldownMinResult = c.min;
     blocks = isSoft
       ? [
-          { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(warmupKm * easyPaceMin) + " min", desc: "Trote suave + movilidad articular." },
+          { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: w.min + " min", desc: "Trote suave + movilidad articular." },
           { label: "PRINCIPAL", name: "Juego de ritmos suave", dist: mainKm.toFixed(1) + "km", pace: pcCombo(paces.marathon, paces.easy), zone: "Z2/Z3", fc: karvonen(0.65, 0.75, fcRest, fcMax), time: "15 min", desc: "Primer contacto con cambios de ritmo: 1 min moderado (Z3) / 2 min suave (Z2). Nada de esfuerzo máximo — es adaptación." },
           { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(cooldownKm * easyPaceMin) + " min", desc: "Caminata o trote regenerativo." },
         ]
@@ -566,14 +573,18 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
   } else if (d.type === "long") {
     const isSpecific = d.workout.toLowerCase().includes("ritmo objetivo");
     const cap = km / 3;
-    const warmupKm = resolveEdge(warmupOverride, 2, cap);
-    const cooldownKm = resolveEdge(cooldownOverride, 2, cap);
+    const w = resolveEdgeMin(warmupMinOverride, 10, cap);
+    const c = resolveEdgeMin(cooldownMinOverride, 10, cap);
+    const warmupKm = w.km,
+      cooldownKm = c.km;
     const mainKm = Math.max(km - warmupKm - cooldownKm, 1);
     const totalKm = Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10;
     typeTag = "FONDO";
     title = `${isSpecific ? "FONDO CON RITMO OBJETIVO" : "FONDO LARGO"} (${totalKm} KM)`;
+    warmupMinResult = w.min;
+    cooldownMinResult = c.min;
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(warmupKm * easyPaceMin) + " min", desc: "Trote suave + movilidad articular." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: w.min + " min", desc: "Trote suave + movilidad articular." },
       {
         label: "PRINCIPAL",
         name: isSpecific ? "Fondo a ritmo objetivo" : "Fondo continuo",
@@ -584,40 +595,47 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo) {
         time: Math.round(mainKm * 5.5) + " min",
         desc: isSpecific ? "Últimos km a ritmo objetivo de carrera." : "Ritmo controlado y constante, últimos km a ritmo objetivo si llegás cómodo.",
       },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(cooldownKm * easyPaceMin) + " min", desc: "Caminata + estiramiento e hidratación." },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: c.min + " min", desc: "Caminata + estiramiento e hidratación." },
     ];
   } else if (d.workout.toLowerCase().includes("ritmo de carrera")) {
     const cap = km / 3;
-    const warmupKm = resolveEdge(warmupOverride, 1.5, cap);
-    const cooldownKm = resolveEdge(cooldownOverride, 1.5, cap);
+    const w = resolveEdgeMin(warmupMinOverride, 10, cap);
+    const c = resolveEdgeMin(cooldownMinOverride, 8, cap);
+    const warmupKm = w.km,
+      cooldownKm = c.km;
     const mainKm = Math.max(km - warmupKm - cooldownKm, 1);
     const totalKm = Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10;
     typeTag = "RITMO";
     title = `RITMO DE CARRERA (${totalKm} KM)`;
+    warmupMinResult = w.min;
+    cooldownMinResult = c.min;
     const racePace = paces.threshold;
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(warmupKm * easyPaceMin) + " min", desc: "Trote suave + progresiones." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: w.min + " min", desc: "Trote suave + progresiones." },
       { label: "PRINCIPAL", name: "Tramo a ritmo objetivo", dist: mainKm.toFixed(1) + "km", pace: pc(racePace), zone: "Z3", fc: karvonen(0.7, 0.8, fcRest, fcMax), time: Math.round(mainKm * 4.75) + " min", desc: "Ritmo objetivo de carrera, sostenido y controlado." },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(cooldownKm * easyPaceMin) + " min", desc: "Trote regenerativo." },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: c.min + " min", desc: "Trote regenerativo." },
     ];
   } else {
     const cap = km / 3;
-    const warmupKm = resolveEdge(warmupOverride, 1, cap);
-    const cooldownKm = resolveEdge(cooldownOverride, 1, cap);
+    const w = resolveEdgeMin(warmupMinOverride, 8, cap);
+    const c = resolveEdgeMin(cooldownMinOverride, 5, cap);
+    const warmupKm = w.km,
+      cooldownKm = c.km;
     const mainKm = Math.max(km - warmupKm - cooldownKm, 1);
     const totalKm = Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10;
     typeTag = "RODAJE";
     title = `RODAJE SUAVE (${totalKm} KM)`;
+    warmupMinResult = w.min;
+    cooldownMinResult = c.min;
     blocks = [
-      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(warmupKm * easyPaceMin) + " min", desc: "Trote suave + movilidad articular." },
+      { label: "CALENTAMIENTO", name: "Entrada en calor", dist: warmupKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: w.min + " min", desc: "Trote suave + movilidad articular." },
       { label: "PRINCIPAL", name: "Rodaje continuo", dist: mainKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z2", fc: karvonen(0.6, 0.7, fcRest, fcMax), time: Math.round(mainKm * 5.7) + " min", desc: "Ritmo conversacional, controlado y cómodo." },
-      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: Math.round(cooldownKm * easyPaceMin) + " min", desc: "Caminata + estiramiento suave." },
+      { label: "VUELTA A CALMA", name: "Vuelta a la calma", dist: cooldownKm.toFixed(1) + "km", pace: pc(paces.easy), zone: "Z1", fc: z1, time: c.min + " min", desc: "Caminata + estiramiento suave." },
     ];
   }
   blocks = blocks.map((b) => ({ ...b, zoneColor: b.zone.includes("1") ? "var(--muted)" : b.zone.toLowerCase() === "neuro" ? "var(--pink)" : "var(--good)" }));
-  // valores numéricos de entrada/vuelta ya resueltos, para precargar los inputs de edición
-  // del coach sin tener que parsear el texto formateado de los bloques.
-  const warmupKm = d.isCaco ? null : parseFloat(blocks[0].dist);
-  const cooldownKm = d.isCaco ? null : parseFloat(blocks[blocks.length - 1].dist);
-  return { typeTag, title, blocks, warmupKm, cooldownKm };
+  // minutos de entrada/vuelta ya resueltos, para precargar los inputs de edición del coach.
+  const warmupMin = d.isCaco ? null : warmupMinResult;
+  const cooldownMin = d.isCaco ? null : cooldownMinResult;
+  return { typeTag, title, blocks, warmupMin, cooldownMin };
 }
