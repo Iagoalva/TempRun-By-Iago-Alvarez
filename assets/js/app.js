@@ -134,7 +134,10 @@ function defaultProfileState() {
     fcRest: "",
     healthNotes: "",
     goalName: "",
-    goalDistance: "10K / 10000m",
+    // arranca en la distancia más chica: para alguien que recién empieza (objetivo tipo
+    // "sentirme mejor", sin carrera en mente) es una sobrepromesa forzarlo a 10K sin que
+    // lo haya elegido — mejor pedirle que suba el objetivo a propósito, no que lo bajemos.
+    goalDistance: "3K / 3000m",
     goalDate: "",
     weeklyKm: 11,
     levelAnswers: { q1: "", q2: "", q3: "", q4: "", q5: "", q6: "", q7: "" },
@@ -186,6 +189,7 @@ let state = {
   coachWeekIndex: 0,
   coachExpandedKey: null,
   coachChatInput: "",
+  coachSearch: "",
   coachKmDraft: {}, // { [dayIdx]: texto tal cual lo está tipeando el coach, para no reformatear a mitad de tipeo }
   coachEdgeDraft: {}, // { "[dayIdx]-warmupMinOverride"|"[dayIdx]-cooldownMinOverride": texto tal cual se tipea }
   stravaJustSynced: false,
@@ -351,7 +355,7 @@ function focusSelector(el) {
   if (d.bind) return `[data-bind="${cssEsc(d.bind)}"]`;
   if (d.action === "coachSetDayKm") return `[data-action="coachSetDayKm"][data-idx="${cssEsc(d.idx)}"]`;
   if (d.action === "coachSetEdge") return `[data-action="coachSetEdge"][data-idx="${cssEsc(d.idx)}"][data-part="${cssEsc(d.part)}"]`;
-  if (d.action === "broadcastInput" || d.action === "athleteMessageInput") return `[data-action="${d.action}"]`;
+  if (d.action === "broadcastInput" || d.action === "athleteMessageInput" || d.action === "coachSearchInput") return `[data-action="${d.action}"]`;
   return null;
 }
 function cssEsc(v) {
@@ -1387,7 +1391,9 @@ function getAthleteSummaries() {
 }
 
 function renderCoachApp() {
-  const athletes = getAthleteSummaries();
+  const allAthletes = getAthleteSummaries();
+  const query = (state.coachSearch || "").trim().toLowerCase();
+  const athletes = query ? allAthletes.filter((a) => a.name.toLowerCase().includes(query)) : allAthletes;
   const levelGroups = LEVEL_ORDER.map((level) => {
     const inLevel = athletes.filter((a) => a.level === level);
     const groupKeys = GROUP_ORDER.filter((gk) => inLevel.some((a) => a.groupKey === gk));
@@ -1414,6 +1420,11 @@ function renderCoachApp() {
       <nav class="sidebar-nav">
         <button class="${state.coachView === "roster" ? "active" : ""}" data-action="backToRoster">${ICONS.people}<span class="nav-label">Panel de atletas</span></button>
       </nav>
+      ${
+        allAthletes.length > 0
+          ? `<input type="text" data-action="coachSearchInput" value="${esc(state.coachSearch || "")}" placeholder="Buscar atleta..." style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;color:var(--text);font-size:12.5px;">`
+          : ""
+      }
       ${
         levelGroups.length > 0
           ? `
@@ -1445,6 +1456,8 @@ function renderCoachApp() {
             )
             .join("")}
         </div>`
+          : query
+          ? `<div style="font-size:12px;color:var(--muted);padding:8px 4px;">Sin resultados para "${esc(state.coachSearch)}"</div>`
           : ""
       }
       <div class="sidebar-footer">
@@ -1692,6 +1705,12 @@ function bindDynamicListeners() {
     el.addEventListener("input", () => {
       state.coachBroadcast = el.value;
       applyCoachBroadcast();
+    });
+  });
+  root.querySelectorAll('[data-action="coachSearchInput"]').forEach((el) => {
+    el.addEventListener("input", () => {
+      state.coachSearch = el.value;
+      render();
     });
   });
   root.querySelectorAll('[data-action="athleteMessageInput"]').forEach((el) => {
