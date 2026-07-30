@@ -1593,9 +1593,9 @@ function renderPerfilMembresia(s) {
       <div class="perfil-grid">
         <div class="perfil-panel">
           <div class="perfil-panel-heading">REALIZAR PAGO</div>
-          <div style="font-size:12.5px;color:var(--muted);">Transferí a <b style="color:var(--text);">Pablo Hernán Aimetta</b></div>
+          <div style="font-size:12.5px;color:var(--muted);">Transferí al alias del club</div>
           <div class="membership-alias-box">
-            <span class="ma-label">ALIAS:</span><span class="ma-value">PABLOAIMETTANEO</span>
+            <span class="ma-label">ALIAS:</span><span class="ma-value">—</span>
           </div>
           <input type="file" id="membership-file-input" accept="image/*,.pdf" style="display:none;" data-action="membershipFileSelected">
           <button type="button" class="membership-upload-btn" data-action="membershipUploadClick">
