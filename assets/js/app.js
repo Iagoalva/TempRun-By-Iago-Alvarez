@@ -194,12 +194,17 @@ let state = {
   coachKmDraft: {}, // { [dayIdx]: texto tal cual lo está tipeando el coach, para no reformatear a mitad de tipeo }
   coachEdgeDraft: {}, // { "[dayIdx]-warmupMinOverride"|"[dayIdx]-cooldownMinOverride": texto tal cual se tipea }
   stravaJustSynced: false,
+  // clima/ubicación del panel — se completa una sola vez por sesión vía geolocalización
+  weatherStatus: "idle", // idle | loading | ready | denied | error | unsupported
+  weatherCity: "",
+  weatherTemp: null,
   // herramientas calculators (local, not persisted)
   toolDistance: "5000",
   toolCustomKm: "",
   toolH: "",
   toolM: "",
   toolS: "",
+  toolGlossaryOpen: false,
   // medidor de FC en reposo (contador de pulsaciones con cronómetro propio)
   pulseMode: "tap", // tap: tocar la pantalla en cada latido | count: cronómetro sin tocar, cargar el total al final
   pulseRunning: false,
@@ -212,6 +217,7 @@ let state = {
   toolPulseManualCount: "",
   // formulario de carga de carreras (registro cronológico), no persistido hasta agregar
   raceFormDist: "p5k",
+  raceFormName: "",
   raceFormDate: "",
   raceFormH: "",
   raceFormM: "",
@@ -874,6 +880,21 @@ function renderApp() {
   </nav>`;
 }
 
+function renderWeatherWidget() {
+  const box = (content) => `<div style="background:var(--surface2);border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:9px;">${ICONS.weather}<div>${content}</div></div>`;
+  if (state.weatherStatus === "ready") {
+    return box(`
+      <div style="font-size:11px;color:var(--muted);font-weight:600;">${esc(state.weatherCity || "Tu ubicación")}</div>
+      <div style="font-size:14px;font-weight:800;">${state.weatherTemp}°C</div>
+    `);
+  }
+  if (state.weatherStatus === "loading") {
+    return box(`<div style="font-size:11.5px;color:var(--muted);font-weight:600;">Ubicando...</div>`);
+  }
+  // denied | error | unsupported | idle: no interrumpimos el panel, solo no mostramos clima
+  return "";
+}
+
 function renderPanel(m, firstName, avatarLetter) {
   const coachMsg = state.profile.coachMessage && state.profile.coachMessage.trim()
     ? state.profile.coachMessage
@@ -892,13 +913,7 @@ function renderPanel(m, firstName, avatarLetter) {
         </div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <div style="background:var(--surface2);border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:9px;">
-          ${ICONS.weather}
-          <div>
-            <div style="font-size:11px;color:var(--muted);font-weight:600;">Buenos Aires</div>
-            <div style="font-size:14px;font-weight:800;">13°C</div>
-          </div>
-        </div>
+        ${renderWeatherWidget()}
         <button class="btn-accent" style="width:auto;padding:11px 18px;margin:0;" data-action="goTab" data-tab="chat">Mensaje al coach</button>
       </div>
     </div>
@@ -1191,7 +1206,50 @@ function renderToolsTab() {
       ${calcResult}
     </div>
 
-    ${renderPulseTool()}`;
+    ${renderPulseTool()}
+    ${renderGlossaryTool()}`;
+}
+
+const GLOSSARY_TERMS = [
+  { term: "FC (frecuencia cardíaca)", def: "Cantidad de latidos del corazón por minuto. Se usa la FC en reposo (recién levantado) y la FC máxima para calcular tus zonas de entrenamiento." },
+  { term: "PB y BPM", def: "PB es tu Personal Best: la mejor marca que registraste en una distancia. BPM es \"beats per minute\" (pulsaciones por minuto), la unidad en la que se mide la FC." },
+  { term: "VDOT", def: "Índice de capacidad aeróbica creado por Jack Daniels. A partir de una marca reciente estima tu nivel actual y calcula los ritmos de entrenamiento (suave, umbral, intervalo, etc.)." },
+  { term: "Zonas (Z1-Z4)", def: "Rangos de FC que indican la intensidad del esfuerzo: Z1 recuperación muy suave, Z2 aeróbico/conversacional, Z3 tempo (moderado-fuerte), Z4 umbral/anaeróbico (esfuerzo alto)." },
+  { term: "Rodaje suave", def: "Trote continuo a ritmo cómodo y conversacional (Z1-Z2). Es la base de cualquier plan: construye resistencia aeróbica sin generar demasiado desgaste." },
+  { term: "Neuro", def: "Trabajo neuromuscular: progresiones o cambios de ritmo cortos y suaves (no son series a fondo) que activan la conexión entre el sistema nervioso y los músculos, mejorando la técnica y la economía de carrera." },
+  { term: "Fondo largo", def: "La sesión más extensa de la semana, a ritmo suave. Entrena la resistencia y la capacidad de sostener el esfuerzo en el tiempo, clave para carreras de 10K en adelante." },
+  { term: "Fartlek", def: "\"Juego de ritmos\" en sueco: alterna tramos rápidos y suaves dentro de la misma sesión, sin distancias exactas, para mejorar la capacidad de cambiar de ritmo." },
+  { term: "Cuestas", def: "Repeticiones en subida a esfuerzo alto. Suman fuerza y potencia en las piernas con menos impacto que las series en llano." },
+  { term: "Series", def: "Repeticiones cortas a ritmo rápido (por ejemplo 6x1000m) con pausas de trote suave entre medio. Mejoran la velocidad y el VO2 máx." },
+  { term: "Ritmo de carrera", def: "Sesión a la velocidad objetivo de tu próxima competencia, para que el cuerpo se acostumbre a sostener ese esfuerzo específico." },
+  { term: "CACO (caminar-correr)", def: "Método que alterna tramos de trote suave y caminata activa. Ideal para arrancar desde cero sin lesionarte, sumando minutos de trote de a poco." },
+  { term: "A sensación / RPE", def: "Cuando no hay una marca cargada para calcular un ritmo exacto, el esfuerzo se guía por sensación (RPE = Rate of Perceived Exertion): tenés que poder mantener una conversación sin ahogarte." },
+  { term: "Estado de carga", def: "Compara tu volumen reciente contra tu volumen habitual para avisarte si estás entrenando en un rango seguro o si el aumento fue demasiado brusco (riesgo de lesión)." },
+  { term: "Descarga (deload)", def: "Semana con menos volumen a propósito, dentro del plan, para que el cuerpo absorba el entrenamiento acumulado y llegue más fresco a la siguiente fase." },
+];
+
+function renderGlossaryTool() {
+  const open = state.toolGlossaryOpen;
+  return `
+    <div class="perfil-panel" style="margin-top:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;" data-action="toggleGlossary">
+        <div class="perfil-panel-heading" style="margin-bottom:0;">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} GLOSARIO</div>
+        <span class="expand-label">${open ? "OCULTAR ▴" : "VER ▾"}</span>
+      </div>
+      ${
+        open
+          ? `<div style="margin-top:16px;max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;">
+              ${GLOSSARY_TERMS.map(
+                (g) => `
+                <div>
+                  <div style="font-size:12.5px;font-weight:800;color:var(--accent);margin-bottom:3px;">${esc(g.term)}</div>
+                  <div style="font-size:12.5px;color:var(--muted);line-height:1.5;">${esc(g.def)}</div>
+                </div>`
+              ).join("")}
+            </div>`
+          : `<div style="font-size:12px;color:var(--muted);margin-top:8px;">¿Qué significa FC, VDOT, rodaje suave...? Tocá "VER" para desplegar las definiciones.</div>`
+      }
+    </div>`;
 }
 
 function renderPulseTool() {
@@ -1331,7 +1389,7 @@ function raceEntryHtml(e) {
         <div class="rd-month">${monthAbbr}</div>
       </div>
       <div class="race-entry-body">
-        <div class="race-entry-title">${dist.label}</div>
+        <div class="race-entry-title">${e.name ? `${esc(e.name)} · ${dist.label}` : dist.label}</div>
         <div class="race-entry-stats">
           <span>${ICONS.pin} ${km} km</span>
           <span>${ICONS.clock} ${formatRaceTime(e.timeSec)}</span>
@@ -1351,6 +1409,7 @@ function renderRaceLog(s) {
         <select class="ob-select" data-bind="raceFormDist">
           ${MARK_DISTS.map((m) => `<option value="${m.key}" ${state.raceFormDist === m.key ? "selected" : ""}>${m.label}</option>`).join("")}
         </select>
+        <input class="ob-text" type="text" data-bind="raceFormName" value="${esc(state.raceFormName)}" placeholder="Nombre de la carrera (opcional)" style="width:auto;flex:1;min-width:160px;">
         ${renderDatePicker("raceFormDate", state.raceFormDate, { maxYear: new Date().getFullYear(), minYear: new Date().getFullYear() - 10, defaultYear: new Date().getFullYear() })}
         <div class="pb-segments" style="opacity:1;">
           <input data-bind="raceFormH" placeholder="H" inputmode="numeric" maxlength="2" value="${esc(state.raceFormH)}">
@@ -2107,7 +2166,13 @@ const ACTIONS = {
     const timeSec = h * 3600 + m * 60 + sec;
     if (!state.raceFormDate || timeSec <= 0) return;
     const distKey = state.raceFormDist;
-    const entry = { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), distKey, date: state.raceFormDate, timeSec };
+    const entry = {
+      id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+      distKey,
+      date: state.raceFormDate,
+      timeSec,
+      name: state.raceFormName.trim(),
+    };
     setProfile((p) => {
       const prevSec = parseTime(p.pbs[distKey] === "NONE" ? "" : p.pbs[distKey]);
       // la carrera cargada actualiza el PB de esa distancia solo si es una marca mejor
@@ -2121,7 +2186,7 @@ const ACTIONS = {
         pbs: isNewBest ? { ...p.pbs, [distKey]: `${h2}:${String(m2).padStart(2, "0")}:${String(s2).padStart(2, "0")}` } : p.pbs,
       };
     });
-    setState({ raceFormDate: "", raceFormH: "", raceFormM: "", raceFormS: "" });
+    setState({ raceFormName: "", raceFormDate: "", raceFormH: "", raceFormM: "", raceFormS: "" });
   },
   deleteRaceEntry: (el) => {
     const id = el.dataset.id;
@@ -2163,6 +2228,7 @@ const ACTIONS = {
     setState({ pulseRunning: false, pulseStartedAt: null, pulseTaps: 0, pulseResult: null, pulseSaved: false, pulseAwaitingCount: false, toolPulseManualCount: "" });
   },
   pulseReset: () => setState({ pulseResult: null, pulseSaved: false, pulseTaps: 0, pulseAwaitingCount: false, toolPulseManualCount: "" }),
+  toggleGlossary: () => setState((s) => ({ toolGlossaryOpen: !s.toolGlossaryOpen })),
   pulseUseResult: () => {
     if (state.pulseResult == null) return;
     setProfile({ fcRest: String(state.pulseResult) });
@@ -2382,6 +2448,7 @@ function enterAccount(email, acc) {
   const profile = acc.profile;
   if (profile.onboardingDone) {
     setState({ screen: "app", role: "athlete", currentEmail: email, profile, athleteTab: "panel", weekIndex: 0, loginError: "" });
+    initWeather();
   } else {
     setState({ screen: "onboarding", role: "athlete", currentEmail: email, profile, onboardingStep: 1, loginError: "" });
   }
@@ -2392,10 +2459,48 @@ function compileProgram() {
   setTimeout(() => setState({ compileStep: 1 }), 700);
   setTimeout(() => setState({ compileStep: 2 }), 1500);
   setTimeout(() => {
-    setProfile({ onboardingDone: true });
+    const g = state.profile.gender;
+    // primer mensaje que ve el atleta en el panel, apenas se compila su plan por primera vez —
+    // el coach puede reemplazarlo después escribiendo el suyo.
+    const welcome = `${g === "Femenino" ? "Bienvenida" : g === "Masculino" ? "Bienvenido" : "Bienvenido/a"} a TempRun by Iago Alvarez. Acá empieza tu camino. ¡Que lo disfrutes!`;
+    setProfile({ onboardingDone: true, coachMessage: welcome });
     persistCurrentProfile();
     setState({ screen: "app", athleteTab: "panel", weekIndex: 0 });
+    initWeather();
   }, 3100);
+}
+
+// Clima/ubicación del panel: se pide una sola vez por sesión de navegador (no por atleta,
+// ya que la ubicación real es la del dispositivo). Si el usuario no da permiso o falla la
+// consulta, el panel simplemente no muestra el clima en vez de trabar la pantalla.
+function initWeather() {
+  if (state.weatherStatus !== "idle") return;
+  if (!navigator.geolocation) {
+    setState({ weatherStatus: "unsupported" });
+    return;
+  }
+  setState({ weatherStatus: "loading" });
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const { latitude, longitude } = pos.coords;
+      try {
+        const [weatherRes, placeRes] = await Promise.all([
+          fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`),
+          fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=es`),
+        ]);
+        const weatherData = await weatherRes.json();
+        const placeData = await placeRes.json();
+        const temp = weatherData?.current_weather?.temperature;
+        const city = placeData?.city || placeData?.locality || placeData?.principalSubdivision || "";
+        if (temp == null) throw new Error("sin datos de clima");
+        setState({ weatherStatus: "ready", weatherTemp: Math.round(temp), weatherCity: city });
+      } catch (e) {
+        setState({ weatherStatus: "error" });
+      }
+    },
+    () => setState({ weatherStatus: "denied" }),
+    { timeout: 8000 }
+  );
 }
 
 function persistCurrentProfile() {
