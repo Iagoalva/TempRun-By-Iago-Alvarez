@@ -25,6 +25,7 @@ const ICONS = {
   clock: `<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="8.5" fill="none" stroke="var(--good)" stroke-width="1.6"/><path d="M12 7.5V12l3 2" fill="none" stroke="var(--good)" stroke-width="1.6" stroke-linecap="round"/></svg>`,
   paceIcon: `<svg viewBox="0 0 24 24" width="13" height="13"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="var(--accent)"/></svg>`,
   raceClose: `<svg viewBox="0 0 24 24" width="13" height="13"><path d="M5 5l14 14M19 5 5 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  heart: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 20.5s-7.5-4.6-9.7-9.3C.7 7.6 2.7 4 6.3 4c1.9 0 3.5 1 4.7 2.5C12.2 5 13.8 4 15.7 4c3.6 0 5.6 3.6 4 7.2C17.5 15.9 12 20.5 12 20.5z" fill="var(--accent)"/></svg>`,
 };
 function sessionIcon(typeTag) {
   return typeTag === "CUESTAS" ? ICONS.mountain : ICONS.lightning;
@@ -199,6 +200,13 @@ let state = {
   toolH: "",
   toolM: "",
   toolS: "",
+  // medidor de FC en reposo (contador de pulsaciones con cronómetro propio)
+  pulseRunning: false,
+  pulseStartedAt: null,
+  pulseTaps: 0,
+  pulseDuration: 30,
+  pulseResult: null,
+  pulseSaved: false,
   // formulario de carga de carreras (registro cronológico), no persistido hasta agregar
   raceFormDist: "p5k",
   raceFormDate: "",
@@ -360,6 +368,19 @@ function focusSelector(el) {
 }
 function cssEsc(v) {
   return String(v).replace(/["\\]/g, "\\$&");
+}
+
+let pulseIntervalId = null;
+function pulseTick() {
+  if (!state.pulseRunning) return;
+  const elapsed = (Date.now() - state.pulseStartedAt) / 1000;
+  if (elapsed >= state.pulseDuration) {
+    clearInterval(pulseIntervalId);
+    pulseIntervalId = null;
+    state.pulseRunning = false;
+    state.pulseResult = Math.round((state.pulseTaps / state.pulseDuration) * 60);
+  }
+  render();
 }
 
 function render() {
@@ -1159,6 +1180,57 @@ function renderToolsTab() {
         <input class="ob-text" type="number" placeholder="S" data-bind="toolS" value="${esc(state.toolS)}">
       </div>
       ${calcResult}
+    </div>
+
+    ${renderPulseTool()}`;
+}
+
+function renderPulseTool() {
+  const durations = [15, 30, 60];
+  let body;
+  if (state.pulseResult != null) {
+    body = `
+      <div style="text-align:center;padding:8px 0;">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.4px;margin-bottom:4px;">FC EN REPOSO ESTIMADA</div>
+        <div style="font-size:38px;font-weight:800;font-style:italic;color:var(--accent);">${state.pulseResult} <span style="font-size:16px;color:var(--muted);font-style:normal;">bpm</span></div>
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap;">
+          ${
+            state.pulseSaved
+              ? `<div style="font-size:12.5px;color:var(--good);font-weight:700;padding:11px 4px;">✓ Guardado como tu FC en reposo</div>`
+              : `<button class="btn-accent" style="width:auto;padding:11px 20px;margin:0;" data-action="pulseUseResult">Usar este valor</button>`
+          }
+          <button class="btn-outline-block" style="width:auto;padding:11px 20px;" data-action="pulseReset">Medir de nuevo</button>
+        </div>
+      </div>`;
+  } else if (state.pulseRunning) {
+    const elapsed = Math.min(state.pulseDuration, (Date.now() - state.pulseStartedAt) / 1000);
+    const remaining = Math.max(0, Math.ceil(state.pulseDuration - elapsed));
+    body = `
+      <div style="text-align:center;padding:4px 0;">
+        <div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">Tocá el círculo cada vez que sientas un latido en la muñeca o el cuello.</div>
+        <button type="button" data-action="pulseTap" style="all:unset;box-sizing:border-box;cursor:pointer;width:150px;height:150px;border-radius:50%;background:color-mix(in oklch, var(--accent) 16%, var(--surface2));border:3px solid var(--accent);display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto;">
+          <div style="font-size:34px;font-weight:800;color:var(--accent);">${state.pulseTaps}</div>
+          <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.4px;">LATIDOS</div>
+        </button>
+        <div style="font-size:22px;font-weight:800;margin-top:16px;">${remaining}s</div>
+        <button class="btn-outline-block" style="width:auto;padding:9px 18px;margin-top:14px;" data-action="pulseCancel">Cancelar</button>
+      </div>`;
+  } else {
+    body = `
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.6;margin-bottom:16px;">
+        Medila apenas te despertás, antes de levantarte de la cama y mientras estás quieto/a: apoyá dos dedos (no el pulgar) sobre la muñeca o el costado del cuello hasta sentir el pulso.
+      </div>
+      <div class="ob-label">DURACIÓN DE LA MEDICIÓN</div>
+      <div class="ob-opts" style="margin-bottom:16px;max-width:320px;">
+        ${durations.map((d) => `<button class="ob-opt-btn ${state.pulseDuration === d ? "active" : ""}" data-action="pulseSetDuration" data-sec="${d}">${d}s</button>`).join("")}
+      </div>
+      <button class="btn-accent" style="width:auto;padding:12px 22px;margin:0;" data-action="pulseStart">${ICONS.heart} Empezar medición</button>
+    `;
+  }
+  return `
+    <div class="perfil-panel" style="margin-top:20px;">
+      <div class="perfil-panel-heading">${ICONS.heart} MEDIR MI FC EN REPOSO</div>
+      ${body}
     </div>`;
 }
 
@@ -1327,6 +1399,7 @@ function renderPerfil() {
     <div class="perfil-grid">
       <div class="perfil-panel">
         <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} MÉTRICAS BIOMECÁNICAS</div>
+        <div style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;">¿No sabés tu FC en reposo? Medila en <b>Herramientas</b>.</div>
         <div class="bio-grid">
           ${bioFields
             .map(
@@ -2019,6 +2092,36 @@ const ACTIONS = {
   deleteRaceEntry: (el) => {
     const id = el.dataset.id;
     setProfile((p) => ({ raceLog: (p.raceLog || []).filter((r) => r.id !== id) }));
+  },
+  pulseSetDuration: (el) => {
+    if (state.pulseRunning) return;
+    setState({ pulseDuration: parseInt(el.dataset.sec, 10), pulseResult: null, pulseSaved: false });
+  },
+  pulseStart: () => {
+    if (pulseIntervalId) clearInterval(pulseIntervalId);
+    state.pulseRunning = true;
+    state.pulseStartedAt = Date.now();
+    state.pulseTaps = 0;
+    state.pulseResult = null;
+    state.pulseSaved = false;
+    pulseIntervalId = setInterval(pulseTick, 150);
+    render();
+  },
+  pulseTap: () => {
+    if (!state.pulseRunning) return;
+    state.pulseTaps++;
+    render();
+  },
+  pulseCancel: () => {
+    if (pulseIntervalId) clearInterval(pulseIntervalId);
+    pulseIntervalId = null;
+    setState({ pulseRunning: false, pulseStartedAt: null, pulseTaps: 0, pulseResult: null, pulseSaved: false });
+  },
+  pulseReset: () => setState({ pulseResult: null, pulseSaved: false, pulseTaps: 0 }),
+  pulseUseResult: () => {
+    if (state.pulseResult == null) return;
+    setProfile({ fcRest: String(state.pulseResult) });
+    setState({ pulseSaved: true });
   },
   goTab: (el) => setState({ athleteTab: el.dataset.tab, selectedDayIdx: null, expandedKey: null }),
   setTheme: (el) => setState({ theme: el.dataset.theme }),
