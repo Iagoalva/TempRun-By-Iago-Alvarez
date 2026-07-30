@@ -26,6 +26,10 @@ const ICONS = {
   paceIcon: `<svg viewBox="0 0 24 24" width="13" height="13"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="var(--accent)"/></svg>`,
   raceClose: `<svg viewBox="0 0 24 24" width="13" height="13"><path d="M5 5l14 14M19 5 5 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
   heart: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 20.5s-7.5-4.6-9.7-9.3C.7 7.6 2.7 4 6.3 4c1.9 0 3.5 1 4.7 2.5C12.2 5 13.8 4 15.7 4c3.6 0 5.6 3.6 4 7.2C17.5 15.9 12 20.5 12 20.5z" fill="var(--accent)"/></svg>`,
+  warnCircle: `<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="9" fill="none" stroke="var(--bad)" stroke-width="1.8"/><line x1="12" y1="7.5" x2="12" y2="13" stroke="var(--bad)" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="16.3" r="1.1" fill="var(--bad)"/></svg>`,
+  checkCircle: `<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="9" fill="none" stroke="var(--good)" stroke-width="1.8"/><path d="M8 12.5l2.5 2.5L16 9.5" fill="none" stroke="var(--good)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  upload: `<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 16V4M8 8l4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  history: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 12a9 9 0 1 0 3-6.7" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/><path d="M3 4v4h4" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4l3 2" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg>`,
 };
 function sessionIcon(typeTag) {
   return typeTag === "CUESTAS" ? ICONS.mountain : ICONS.lightning;
@@ -154,6 +158,11 @@ function defaultProfileState() {
     coachReadCount: 0,
     onboardingDone: false,
     raceLog: [], // [{ id, distKey: "p3k"|"p5k"|"p10k", date: "YYYY-MM-DD", timeSec }]
+    // membresía: placeholder manual (transferencia + comprobante) hasta que se integre
+    // una pasarela de pago real. membershipStatus: "vencida" | "activa"
+    membershipStatus: "vencida",
+    membershipValidUntil: "",
+    membershipHistory: [], // [{ id, fileName, uploadedAt: "YYYY-MM-DD", status: "Pendiente de revisión" }]
   };
 }
 
@@ -1557,11 +1566,63 @@ function renderPerfilSalud(s) {
     </div>`;
 }
 
-function renderPerfilMembresia() {
+function formatDateShort(iso) {
+  if (!iso) return "--/--/----";
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return "--/--/----";
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+}
+
+function renderPerfilMembresia(s) {
+  const isActive = s.membershipStatus === "activa";
+  const history = [...(s.membershipHistory || [])].sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
   return `
-    <div class="perfil-panel" style="text-align:center;padding:60px 20px;max-width:480px;">
-      <div style="font-size:16px;font-weight:800;margin-bottom:8px;">Próximamente</div>
-      <div style="font-size:12.5px;color:var(--muted);line-height:1.6;">La gestión de membresía del club (plan, pagos y estado de cuenta) se va a habilitar más adelante.</div>
+    <div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:16px;">Gestión manual por ahora — pronto se va a integrar con una pasarela de pago.</div>
+      <div class="membership-status-card ${isActive ? "activa" : "vencida"}">
+        <div>
+          <div class="ms-label">${isActive ? ICONS.checkCircle : ICONS.warnCircle} ESTADO ACTUAL</div>
+          <div class="ms-title">MEMBRESÍA ${isActive ? "ACTIVA" : "VENCIDA"}</div>
+        </div>
+        <div class="membership-valid-box">
+          <div class="mv-label">VÁLIDO HASTA</div>
+          <div class="mv-value">${formatDateShort(s.membershipValidUntil)}</div>
+        </div>
+      </div>
+
+      <div class="perfil-grid">
+        <div class="perfil-panel">
+          <div class="perfil-panel-heading">REALIZAR PAGO</div>
+          <div style="font-size:12.5px;color:var(--muted);">Transferí a <b style="color:var(--text);">Pablo Hernán Aimetta</b></div>
+          <div class="membership-alias-box">
+            <span class="ma-label">ALIAS:</span><span class="ma-value">PABLOAIMETTANEO</span>
+          </div>
+          <input type="file" id="membership-file-input" accept="image/*,.pdf" style="display:none;" data-action="membershipFileSelected">
+          <button type="button" class="membership-upload-btn" data-action="membershipUploadClick">
+            ${ICONS.upload}
+            Subir Comprobante
+          </button>
+        </div>
+        <div class="perfil-panel">
+          <div class="perfil-panel-heading">${ICONS.history} HISTORIAL</div>
+          ${
+            history.length
+              ? `<div>${history
+                  .map(
+                    (h) => `
+                <div class="membership-history-row">
+                  <div>
+                    <div style="font-size:12.5px;font-weight:700;">${esc(h.fileName)}</div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:2px;">${formatDateShort(h.uploadedAt)}</div>
+                  </div>
+                  <span style="font-size:10.5px;font-weight:700;color:var(--warn);background:color-mix(in oklch, var(--warn) 18%, transparent);padding:4px 10px;border-radius:12px;white-space:nowrap;">${esc(h.status)}</span>
+                </div>`
+                  )
+                  .join("")}</div>`
+              : `<div style="font-size:12.5px;color:var(--muted);font-style:italic;text-align:center;padding:20px 0;">Sin pagos recientes.</div>`
+          }
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1922,6 +1983,15 @@ function bindDynamicListeners() {
       render();
     });
   });
+  root.querySelectorAll('[data-action="membershipFileSelected"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      const file = el.files && el.files[0];
+      if (!file) return;
+      const entry = { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), fileName: file.name, uploadedAt: new Date().toISOString().slice(0, 10), status: "Pendiente de revisión" };
+      setProfile((p) => ({ membershipHistory: [...(p.membershipHistory || []), entry] }));
+      el.value = "";
+    });
+  });
   root.querySelectorAll('[data-action="athleteMessageInput"]').forEach((el) => {
     el.addEventListener("input", () => {
       const accounts = loadAccounts();
@@ -2272,6 +2342,10 @@ const ACTIONS = {
   },
   pulseReset: () => setState({ pulseResult: null, pulseSaved: false, pulseTaps: 0, pulseAwaitingCount: false, toolPulseManualCount: "" }),
   toggleGlossary: () => setState((s) => ({ toolGlossaryOpen: !s.toolGlossaryOpen })),
+  membershipUploadClick: () => {
+    const el = document.getElementById("membership-file-input");
+    if (el) el.click();
+  },
   pulseUseResult: () => {
     if (state.pulseResult == null) return;
     setProfile({ fcRest: String(state.pulseResult) });

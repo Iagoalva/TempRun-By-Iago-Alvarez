@@ -1712,6 +1712,120 @@ button {
   border-bottom-color: var(--accent);
 }
 
+.membership-status-card {
+  border-radius: 16px;
+  padding: 24px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+  border: 1px solid;
+}
+.membership-status-card.vencida {
+  background: linear-gradient(135deg, color-mix(in oklch, var(--bad) 20%, var(--surface)), var(--surface));
+  border-color: color-mix(in oklch, var(--bad) 35%, transparent);
+}
+.membership-status-card.activa {
+  background: linear-gradient(135deg, color-mix(in oklch, var(--good) 18%, var(--surface)), var(--surface));
+  border-color: color-mix(in oklch, var(--good) 35%, transparent);
+}
+.membership-status-card .ms-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.membership-status-card .ms-title {
+  font-size: 32px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.3px;
+}
+.membership-status-card.vencida .ms-title {
+  color: var(--bad);
+}
+.membership-status-card.activa .ms-title {
+  color: var(--good);
+}
+.membership-valid-box {
+  flex: none;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 22px;
+  text-align: center;
+}
+.membership-valid-box .mv-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.membership-valid-box .mv-value {
+  font-size: 15px;
+  font-weight: 800;
+  font-style: italic;
+}
+.membership-alias-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 12px 0;
+}
+.membership-alias-box .ma-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.4px;
+  margin-right: 6px;
+}
+.membership-alias-box .ma-value {
+  font-size: 14px;
+  font-weight: 800;
+}
+.membership-upload-btn {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: 100%;
+  border: 1.5px dashed var(--border);
+  border-radius: 10px;
+  padding: 22px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+}
+.membership-upload-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.membership-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.membership-history-row + .membership-history-row {
+  margin-top: 8px;
+}
+
 .pbs-list {
   display: flex;
   flex-direction: column;
