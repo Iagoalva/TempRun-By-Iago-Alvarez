@@ -178,6 +178,7 @@ let state = {
   compileStep: 0,
   theme: "dark",
   athleteTab: "panel",
+  perfilTab: "datos", // datos | carreras | fisiologia | salud | membresia
   weekIndex: 0,
   expandedKey: null,
   selectedDayIdx: null,
@@ -1426,17 +1427,43 @@ function renderRaceLog(s) {
     </div>`;
 }
 
+const PERFIL_TABS = [
+  { key: "datos", label: "MIS DATOS" },
+  { key: "carreras", label: "CARRERAS" },
+  { key: "fisiologia", label: "FISIOLOGÍA" },
+  { key: "salud", label: "SALUD" },
+  { key: "membresia", label: "MEMBRESÍA" },
+];
+
 function renderPerfil() {
   const s = state.profile;
+  const tab = state.perfilTab || "datos";
+  const bodies = {
+    datos: renderPerfilDatos(s),
+    carreras: renderRaceLog(s),
+    fisiologia: renderMyMarks(s),
+    salud: renderPerfilSalud(s),
+    membresia: renderPerfilMembresia(s),
+  };
+  return `
+    <div class="ob-title">PERFIL DE ATLETA</div>
+    <div class="perfil-tabs">
+      ${PERFIL_TABS.map((t) => `<button class="perfil-tab-btn ${tab === t.key ? "active" : ""}" data-action="setPerfilTab" data-tab="${t.key}">${t.label}</button>`).join("")}
+    </div>
+    ${bodies[tab] || bodies.datos}
+    <div style="margin-top:32px;max-width:420px;">
+      <button class="btn-outline-block" style="padding:16px 0;font-size:15.5px;" data-action="logout">Cerrar sesión</button>
+    </div>`;
+}
+
+function renderPerfilDatos(s) {
   const age = ageFromBirthdate(s.birthdate);
   const fcMax = fcMaxFromAge(age);
   const bioFields = [
-    { key: "fullName", label: "NOMBRE", value: s.fullName },
     { key: "weight", label: "PESO (KG)", value: s.weight },
     { key: "height", label: "ALTURA (CM)", value: s.height },
     { key: "fcRest", label: "FC REPOSO", value: s.fcRest },
-    { key: null, label: "FC MÁXIMA (211−0,64×edad)", value: fcMax, disabled: true },
-    { key: "gender", label: "SEXO", value: s.gender },
+    { key: null, label: "FC MÁXIMA (211−0,64×EDAD)", value: fcMax, disabled: true },
   ];
   const pbDefs = [
     { key: "walk", label: "RECORD CAMINANDO" },
@@ -1444,9 +1471,7 @@ function renderPerfil() {
     { key: "p5k", label: "PB 5K" },
     { key: "p10k", label: "PB 10K" },
   ];
-
   return `
-    <div class="ob-title">PERFIL DE ATLETA</div>
     <div class="ob-photo">
       <div class="avatar-placeholder">
         <svg viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="7" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="13.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
@@ -1464,11 +1489,39 @@ function renderPerfil() {
       </div>
     </div>
 
-    <div class="strava-card">
-      <div class="strava-heading">${ICONS.strava} STRAVA</div>
+    <div class="perfil-grid">
+      <div class="perfil-panel">
+        <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} MÉTRICAS BIOMECÁNICAS</div>
+        <div style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;">¿No sabés tu FC en reposo? Medila en <b>Herramientas</b>.</div>
+        <div class="bio-grid">
+          ${bioFields
+            .map(
+              (f) => `
+            <div class="metric-card">
+              <div class="m-label">${f.label}</div>
+              <input type="text" value="${esc(String(f.value ?? ""))}" ${f.disabled ? "disabled" : `data-bind="profile.${f.key}"`}>
+            </div>`
+            )
+            .join("")}
+        </div>
+        <div class="metric-card" style="margin-top:12px;">
+          <div class="m-label">NACIMIENTO</div>
+          ${renderDatePicker("profile.birthdate", s.birthdate, { minYear: 1940, maxYear: new Date().getFullYear() - 5, defaultYear: 1995 })}
+        </div>
+      </div>
+      <div class="perfil-panel">
+        <div class="perfil-panel-heading"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="8" fill="none" stroke="var(--accent)" stroke-width="1.6"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg> PBS</div>
+        <div class="pbs-list">
+          ${pbDefs.map((f) => `<div class="pb-row">${pbFieldHtml(f, s, false)}</div>`).join("")}
+        </div>
+      </div>
+    </div>
+
+    <div class="strava-card" style="margin-top:22px;">
+      <div class="strava-heading">${ICONS.strava} INTEGRACIONES</div>
       ${
         s.stravaStatus === "disconnected"
-          ? `<div class="strava-desc">Conectá tu cuenta para vincular el ritmo y el tiempo real de tus carreras a esta app.</div>
+          ? `<div class="strava-desc">Conectá tu cuenta de Strava para vincular el ritmo y el tiempo real de tus carreras a esta app.</div>
              <button class="btn-accent" style="width:auto;padding:11px 20px;margin:0;" data-action="connectStrava">Conectar con Strava</button>`
           : s.stravaStatus === "connecting"
           ? `<div class="strava-connecting"><div class="spinner-sm"></div><div style="font-size:13px;color:var(--muted);">Redirigiendo a Strava para autorizar...</div></div>`
@@ -1484,41 +1537,31 @@ function renderPerfil() {
              </div>
              <div class="strava-desc" style="margin:12px 0 0;">Simulación: te trae tu próxima sesión pendiente del plan y le carga un ritmo y tiempo reales, como haría una sincronización real de Strava.</div>`
       }
-    </div>
+    </div>`;
+}
 
-    ${renderMyMarks(s)}
-    ${renderRaceLog(s)}
-
-    <div class="perfil-grid">
-      <div class="perfil-panel">
-        <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} MÉTRICAS BIOMECÁNICAS</div>
-        <div style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;">¿No sabés tu FC en reposo? Medila en <b>Herramientas</b>.</div>
-        <div class="bio-grid">
-          ${bioFields
-            .map(
-              (f) => `
-            <div class="bio-field">
-              <div class="b-label">${f.label}</div>
-              <input type="text" value="${esc(String(f.value ?? ""))}" ${f.disabled ? "disabled style='opacity:0.7'" : `data-bind="profile.${f.key}"`}>
-            </div>`
-            )
-            .join("")}
-          <div class="bio-field">
-            <div class="b-label">NACIMIENTO</div>
-            ${renderDatePicker("profile.birthdate", s.birthdate, { minYear: 1940, maxYear: new Date().getFullYear() - 5, defaultYear: 1995 })}
-          </div>
-        </div>
+function renderPerfilSalud(s) {
+  return `
+    <div class="perfil-panel" style="max-width:640px;">
+      <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} CONTEXTO DE SALUD Y EXPERIENCIA</div>
+      <div style="font-size:12px;color:var(--muted);margin:-10px 0 18px;">Esto es lo que usamos para calcular tu nivel. Actualizalo si algo cambió (por ejemplo, una lesión).</div>
+      <div class="ob-question">
+        ${questionHtml("q1", "¿Corrés actualmente de forma regular?", [["si", "Sí"], ["no", "No"]], s)}
+        ${questionHtml("q2", "¿Hace cuánto corrés de forma continua?", [["nunca", "Nunca"], ["menos6", "< 6 meses"], ["mas6", "+ 6 meses"]], s)}
+        ${questionHtml("q3", "¿Cuántos km corrés por semana en promedio?", [["cero", "0 km"], ["poco", "1-15 km"], ["mas15", "+15 km"]], s)}
+        ${questionHtml("q4", "¿Cuántos minutos podés correr seguido, sin parar a caminar, hoy en día?", [["no", "No puedo correr sin parar"], ["menos20", "Menos de 20 min"], ["20a35", "20 a 35 min"], ["mas35", "Más de 35 min"]], s)}
+        ${questionHtml("q5", "¿Entrenaste alguna vez con un plan o corriste una carrera oficial?", [["si", "Sí"], ["no", "No"]], s)}
+        ${questionHtml("q6", "¿Cuándo corriste por última vez de forma regular?", [["nunca", "Nunca corrí regular"], ["mas6", "Hace + 6 meses"], ["menos6", "Hace - 6 meses"], ["activo", "Corro activamente ahora"]], s)}
+        ${questionHtml("q7", "¿Tuviste alguna lesión reciente que te haya limitado?", [["limitante", "Sí, todavía me limita"], ["recuperado", "Sí, ya recuperado/a"], ["no", "No"]], s)}
       </div>
-      <div class="perfil-panel">
-        <div class="perfil-panel-heading"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="8" fill="none" stroke="var(--accent)" stroke-width="1.6"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg> PBS</div>
-        <div class="pbs-list">
-          ${pbDefs.map((f) => `<div class="pb-row">${pbFieldHtml(f, s, false)}</div>`).join("")}
-        </div>
-      </div>
-    </div>
+    </div>`;
+}
 
-    <div style="margin-top:32px;max-width:420px;">
-      <button class="btn-outline-block" style="padding:16px 0;font-size:15.5px;" data-action="logout">Cerrar sesión</button>
+function renderPerfilMembresia() {
+  return `
+    <div class="perfil-panel" style="text-align:center;padding:60px 20px;max-width:480px;">
+      <div style="font-size:16px;font-weight:800;margin-bottom:8px;">Próximamente</div>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.6;">La gestión de membresía del club (plan, pagos y estado de cuenta) se va a habilitar más adelante.</div>
     </div>`;
 }
 
@@ -2235,6 +2278,7 @@ const ACTIONS = {
     setState({ pulseSaved: true });
   },
   goTab: (el) => setState({ athleteTab: el.dataset.tab, selectedDayIdx: null, expandedKey: null }),
+  setPerfilTab: (el) => setState({ perfilTab: el.dataset.tab }),
   setTheme: (el) => setState({ theme: el.dataset.theme }),
   pickDay: (el) => setState({ selectedDayIdx: parseInt(el.dataset.idx, 10) }),
   weekPrev: () => setState((s) => ({ weekIndex: Math.max(0, s.weekIndex - 1), expandedKey: null, selectedDayIdx: null })),
