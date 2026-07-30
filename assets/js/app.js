@@ -30,6 +30,10 @@ const ICONS = {
   checkCircle: `<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="9" fill="none" stroke="var(--good)" stroke-width="1.8"/><path d="M8 12.5l2.5 2.5L16 9.5" fill="none" stroke="var(--good)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   upload: `<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 16V4M8 8l4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   history: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 12a9 9 0 1 0 3-6.7" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/><path d="M3 4v4h4" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4l3 2" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+  scale: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 3v18M7 21h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4 7h6M14 7h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4 7l-2 4a3 3 0 0 0 6 0l-2-4M20 7l-2 4a3 3 0 0 0 6 0l-2-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`,
+  flame: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 2c1 4-4 5-4 9a4 4 0 0 0 8 0c1.5 1 2 2.6 2 4a6 6 0 1 1-12 0c0-5 3-6 4-9 .5 2 1.5 2 2 0z" fill="currentColor"/></svg>`,
+  pulseWave: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M2 12h4l2-7 4 14 2-9 2 5h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  calculator: `<svg viewBox="0 0 24 24" width="16" height="16"><rect x="4" y="2" width="16" height="20" rx="2" fill="none" stroke="var(--accent)" stroke-width="1.6"/><line x1="7" y1="6" x2="17" y2="6" stroke="var(--accent)" stroke-width="1.6"/><circle cx="7.5" cy="12" r="1" fill="var(--accent)"/><circle cx="12" cy="12" r="1" fill="var(--accent)"/><circle cx="16.5" cy="12" r="1" fill="var(--accent)"/><circle cx="7.5" cy="16.5" r="1" fill="var(--accent)"/><circle cx="12" cy="16.5" r="1" fill="var(--accent)"/><circle cx="16.5" cy="16.5" r="1" fill="var(--accent)"/></svg>`,
 };
 function sessionIcon(typeTag) {
   return typeTag === "CUESTAS" ? ICONS.mountain : ICONS.lightning;
@@ -163,6 +167,8 @@ function defaultProfileState() {
     membershipStatus: "vencida",
     membershipValidUntil: "",
     membershipHistory: [], // [{ id, fileName, uploadedAt: "YYYY-MM-DD", status: "Pendiente de revisión" }]
+    // actividad diaria fuera del running, para estimar el gasto calórico total (TDEE)
+    activityLevel: "moderada", // sedentaria | moderada | activa
   };
 }
 
@@ -1336,6 +1342,125 @@ function renderPulseTool() {
     </div>`;
 }
 
+const ACTIVITY_LEVEL_OPTS = [
+  ["sedentaria", "Sedentaria (trabajo sentado, poco movimiento)"],
+  ["moderada", "Moderada (de pie / caminando parte del día)"],
+  ["activa", "Activa (trabajo físico, mucho movimiento)"],
+];
+
+function renderPerfilFisiologia(s) {
+  const age = ageFromBirthdate(s.birthdate);
+  const fcMax = fcMaxFromAge(age);
+  const fcRest = parseFloat(s.fcRest) || 0;
+  const bmi = computeBMI(s.weight, s.height);
+  const bmr = computeBMR(s.weight, s.height, age, s.gender);
+  const m = computeRenderModel();
+  const tdee = computeTDEE(bmr, s.activityLevel, s.weight, m.totalKm);
+  const healthyRange = healthyWeightRange(s.height);
+  const metabolicAge = bmi ? computeMetabolicAge(age, bmi.category, s.fcRest, m.totalKm, m.level) : null;
+  const risk = bmi ? computeRiskIndicator(bmi.category, s.fcRest, m.weekMeta.isDeload ? "" : m.acwrStatus.label) : null;
+  const zones = fcZones(fcRest, fcMax);
+  const hasBodyData = !!(s.weight && s.height);
+
+  if (!hasBodyData) {
+    return `
+      <div class="perfil-panel" style="max-width:560px;margin-bottom:22px;">
+        <div style="font-size:13px;color:var(--muted);">Cargá tu peso y altura en <b style="color:var(--text);">Mis Datos</b> para ver acá tu IMC, gasto calórico, composición y zonas de FC.</div>
+      </div>
+      ${renderMyMarks(s)}`;
+  }
+
+  const metabolicBadge = metabolicAge == null ? "" : metabolicAge < age ? "EXCELENTE" : metabolicAge === age ? "ESPERABLE" : "A TRABAJAR";
+  const metabolicColor = metabolicAge == null ? "var(--muted)" : metabolicAge < age ? "var(--good)" : metabolicAge === age ? "var(--warn)" : "var(--bad)";
+
+  return `
+    <div class="physio-stat-grid">
+      <div class="physio-stat-box">
+        <span class="p-icon">${ICONS.scale}</span>
+        <div class="p-label">ÍNDICE MASA CORPORAL</div>
+        <div class="p-value" style="color:${bmi.color};">${bmi.value}<span class="p-unit">IMC</span></div>
+        <div class="physio-badge">${bmi.category.toUpperCase()}</div>
+      </div>
+      <div class="physio-stat-box">
+        <span class="p-icon">${ICONS.flame}</span>
+        <div class="p-label">GASTO DIARIO (TDEE)</div>
+        <div class="p-value">${tdee ?? "—"}<span class="p-unit">KCAL</span></div>
+        <div class="physio-badge">MANTENIMIENTO</div>
+      </div>
+      <div class="physio-stat-box">
+        <span class="p-icon">${ICONS.pulseWave}</span>
+        <div class="p-label">EDAD METABÓLICA</div>
+        <div class="p-value" style="color:${metabolicColor};">${metabolicAge ?? "—"}<span class="p-unit">AÑOS</span></div>
+        <div class="physio-badge">${metabolicBadge}</div>
+      </div>
+    </div>
+
+    <div class="perfil-grid">
+      <div class="perfil-panel">
+        <div class="perfil-panel-heading">${ICONS.heart} MOTOR CARDÍACO</div>
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px;">
+          <div>
+            <div style="font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:0.4px;">FC MÁXIMA ESTIMADA</div>
+            <div style="font-size:30px;font-weight:800;font-style:italic;">${fcMax} <span style="font-size:14px;color:var(--muted);font-style:normal;">BPM</span></div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:9.5px;font-weight:700;color:var(--muted);letter-spacing:0.4px;">FÓRMULA</div>
+            <div style="font-size:11.5px;font-weight:700;">211 − 0,64×edad</div>
+          </div>
+        </div>
+        ${zones
+          .map(
+            (z, i) => `
+          <div class="zone-row">
+            <div class="zone-fill" style="width:${45 + i * 11}%;background:${z.color};">${z.name}</div>
+            <span class="zone-range">${z.range.replace(" bpm", "")}</span>
+          </div>`
+          )
+          .join("")}
+      </div>
+      <div>
+        <div class="perfil-panel" style="margin-bottom:14px;">
+          <div class="perfil-panel-heading">${ICONS.calculator} COMPOSICIÓN</div>
+          <div class="physio-info-box">
+            <div>
+              <div class="pi-label">METABOLISMO BASAL (BMR)</div>
+              <div class="pi-value">${bmr ?? "—"} kcal</div>
+            </div>
+          </div>
+          <div class="physio-info-box" style="margin-bottom:0;">
+            <div>
+              <div class="pi-label">PESO SALUDABLE EST.</div>
+              <div class="pi-value">${healthyRange ? `${healthyRange.min}kg - ${healthyRange.max}kg` : "—"}</div>
+            </div>
+          </div>
+        </div>
+        ${
+          risk
+            ? `<div class="risk-box" style="background:color-mix(in oklch, ${risk.color} 12%, var(--surface));border-color:color-mix(in oklch, ${risk.color} 35%, transparent);">
+                 ${risk.label === "Bajo" ? ICONS.checkCircle : ICONS.warnCircle}
+                 <div>
+                   <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.4px;">INDICADOR DE RIESGO</div>
+                   <div style="font-size:18px;font-weight:800;font-style:italic;color:${risk.color};">${risk.label.toUpperCase()}</div>
+                 </div>
+               </div>`
+            : ""
+        }
+      </div>
+    </div>
+
+    <div class="perfil-panel" style="max-width:560px;margin-bottom:22px;">
+      <div class="perfil-panel-heading">ACTIVIDAD DIARIA (fuera de correr)</div>
+      <div style="font-size:11.5px;color:var(--muted);margin:-10px 0 14px;">Se usa para calcular tu gasto calórico total (TDEE) junto con el km semanal de tu plan.</div>
+      <div class="ob-opts">
+        ${ACTIVITY_LEVEL_OPTS.map(([v, l]) => `<button class="ob-opt-btn ${s.activityLevel === v ? "active" : ""}" data-action="setActivityLevel" data-val="${v}">${l}</button>`).join("")}
+      </div>
+    </div>
+
+    <div style="font-size:10.5px;color:var(--muted);margin:-10px 0 22px;line-height:1.5;">IMC, gasto calórico y edad metabólica son estimaciones orientativas calculadas con tus propios datos (peso, altura, FC en reposo y volumen de entrenamiento) — no reemplazan una evaluación médica.</div>
+
+    ${renderMyMarks(s)}`;
+}
+
 const MARK_DISTS = [
   { key: "p3k", label: "3K", distM: 3000 },
   { key: "p5k", label: "5K", distM: 5000 },
@@ -1450,7 +1575,7 @@ function renderPerfil() {
   const bodies = {
     datos: renderPerfilDatos(s),
     carreras: renderRaceLog(s),
-    fisiologia: renderMyMarks(s),
+    fisiologia: renderPerfilFisiologia(s),
     salud: renderPerfilSalud(s),
     membresia: renderPerfilMembresia(s),
   };
@@ -2353,6 +2478,7 @@ const ACTIONS = {
   },
   goTab: (el) => setState({ athleteTab: el.dataset.tab, selectedDayIdx: null, expandedKey: null }),
   setPerfilTab: (el) => setState({ perfilTab: el.dataset.tab }),
+  setActivityLevel: (el) => setProfile({ activityLevel: el.dataset.val }),
   setTheme: (el) => setState({ theme: el.dataset.theme }),
   pickDay: (el) => setState({ selectedDayIdx: parseInt(el.dataset.idx, 10) }),
   weekPrev: () => setState((s) => ({ weekIndex: Math.max(0, s.weekIndex - 1), expandedKey: null, selectedDayIdx: null })),

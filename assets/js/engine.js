@@ -66,6 +66,116 @@ function ageFromBirthdate(str) {
 function fcMaxFromAge(age) {
   return Math.round(211 - 0.64 * age);
 }
+
+// ---- Panel de Fisiología: IMC, gasto calórico, zonas de FC y estimaciones orientativas ----
+// Todo lo que sigue reutiliza las mismas fórmulas de FC máx/zonas que ya usa el resto de la
+// app (Karvonen + 211-0,64×edad) para no mostrarle al atleta dos sistemas de zonas distintos.
+
+function computeBMI(weightKg, heightCm) {
+  const w = parseFloat(weightKg),
+    h = parseFloat(heightCm) / 100;
+  if (!w || !h) return null;
+  const value = w / (h * h);
+  let category, color;
+  if (value < 18.5) {
+    category = "Bajo peso";
+    color = "var(--warn)";
+  } else if (value < 25) {
+    category = "Peso normal";
+    color = "var(--good)";
+  } else if (value < 30) {
+    category = "Sobrepeso";
+    color = "var(--warn)";
+  } else {
+    category = "Obesidad";
+    color = "var(--bad)";
+  }
+  return { value: Math.round(value * 10) / 10, category, color };
+}
+
+function healthyWeightRange(heightCm) {
+  const h = parseFloat(heightCm) / 100;
+  if (!h) return null;
+  return { min: Math.round(18.5 * h * h), max: Math.round(24.9 * h * h) };
+}
+
+// Mifflin-St Jeor: fórmula estándar actual para metabolismo basal, más precisa que
+// Harris-Benedict. Necesita peso, altura, edad y sexo (todos datos que ya carga el atleta).
+function computeBMR(weightKg, heightCm, age, gender) {
+  const w = parseFloat(weightKg),
+    h = parseFloat(heightCm);
+  if (!w || !h) return null;
+  const base = 10 * w + 6.25 * h - 5 * age;
+  if (gender === "Masculino") return Math.round(base + 5);
+  if (gender === "Femenino") return Math.round(base - 161);
+  return Math.round(base - 78); // "Otro": punto medio entre el ajuste masculino y femenino
+}
+
+// Multiplicadores de actividad diaria SIN contar el running (eso se suma aparte abajo, para
+// no contar el entrenamiento dos veces si el atleta ya se clasifica como "activo").
+const ACTIVITY_FACTORS = { sedentaria: 1.2, moderada: 1.375, activa: 1.55 };
+
+function computeTDEE(bmr, activityLevel, weightKg, weeklyKm) {
+  if (bmr == null) return null;
+  const factor = ACTIVITY_FACTORS[activityLevel] || ACTIVITY_FACTORS.moderada;
+  // calorías extra estimadas por el running de la semana (~1 kcal por kg por km corrido),
+  // prorrateadas a un promedio diario — usa el km semanal real del plan cargado del atleta.
+  const w = parseFloat(weightKg);
+  const runningKcalPerDay = w && weeklyKm ? (w * weeklyKm) / 7 : 0;
+  return Math.round(bmr * factor + runningKcalPerDay);
+}
+
+// "Edad metabólica" no tiene una fórmula médica estándar (en básculas de bioimpedancia es un
+// cálculo propietario). Acá se aproxima ajustando la edad cronológica según señales reales que
+// ya tenemos del atleta: composición corporal (IMC), FC en reposo y volumen de entrenamiento
+// semanal actual contra el rango esperado para su nivel. Es una referencia orientativa, no un
+// dato clínico.
+function computeMetabolicAge(chronoAge, bmiCategory, fcRest, weeklyKm, level) {
+  let adj = 0;
+  if (bmiCategory === "Bajo peso" || bmiCategory === "Sobrepeso") adj += 2;
+  else if (bmiCategory === "Obesidad") adj += 5;
+  const rest = parseFloat(fcRest);
+  if (rest) {
+    if (rest < 55) adj -= 3;
+    else if (rest < 65) adj -= 1;
+    else if (rest < 75) adj += 0;
+    else if (rest < 85) adj += 2;
+    else adj += 4;
+  }
+  const range = LEVEL_WEEKLY_KM[level] || LEVEL_WEEKLY_KM.Intermedio;
+  if (weeklyKm != null) adj += weeklyKm >= range.min ? -2 : 2;
+  const result = Math.round(chronoAge + adj);
+  return Math.max(chronoAge - 10, Math.min(chronoAge + 15, result));
+}
+
+// Indicador de riesgo orientativo: combina composición corporal, FC en reposo y el estado de
+// carga de entrenamiento (ACWR) que ya calcula el resto de la app — no reemplaza una revisión
+// médica, es una señal de alerta temprana con los datos que el atleta ya cargó.
+function computeRiskIndicator(bmiCategory, fcRest, acwrLabel) {
+  let score = 0;
+  if (bmiCategory === "Obesidad") score += 2;
+  else if (bmiCategory === "Bajo peso" || bmiCategory === "Sobrepeso") score += 1;
+  const rest = parseFloat(fcRest);
+  if (rest) {
+    if (rest > 90) score += 2;
+    else if (rest > 80) score += 1;
+  }
+  if (acwrLabel === "Riesgo Alto") score += 2;
+  else if (acwrLabel === "Precaución") score += 1;
+  if (score <= 1) return { label: "Bajo", color: "var(--good)" };
+  if (score <= 3) return { label: "Moderado", color: "var(--warn)" };
+  return { label: "Alto", color: "var(--bad)" };
+}
+
+function fcZones(fcRest, fcMax) {
+  return [
+    { key: "Z1", name: "Recuperación", range: karvonen(0.5, 0.6, fcRest, fcMax), color: "var(--muted)" },
+    { key: "Z2", name: "Aeróbico", range: karvonen(0.6, 0.75, fcRest, fcMax), color: "var(--good)" },
+    { key: "Z3", name: "Tempo", range: karvonen(0.75, 0.85, fcRest, fcMax), color: "var(--warn)" },
+    { key: "Z4", name: "Umbral", range: karvonen(0.85, 0.95, fcRest, fcMax), color: "#c2703d" },
+    { key: "Z5", name: "VO2 Máx", range: karvonen(0.95, 1.0, fcRest, fcMax), color: "var(--bad)" },
+  ];
+}
 function parseTime(str) {
   if (!str || str === "NONE") return 0;
   const parts = str.split(":").map(Number);
