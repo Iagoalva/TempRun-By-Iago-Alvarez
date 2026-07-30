@@ -201,12 +201,15 @@ let state = {
   toolM: "",
   toolS: "",
   // medidor de FC en reposo (contador de pulsaciones con cronómetro propio)
+  pulseMode: "tap", // tap: tocar la pantalla en cada latido | count: cronómetro sin tocar, cargar el total al final
   pulseRunning: false,
   pulseStartedAt: null,
   pulseTaps: 0,
   pulseDuration: 30,
   pulseResult: null,
   pulseSaved: false,
+  pulseAwaitingCount: false,
+  toolPulseManualCount: "",
   // formulario de carga de carreras (registro cronológico), no persistido hasta agregar
   raceFormDist: "p5k",
   raceFormDate: "",
@@ -378,7 +381,13 @@ function pulseTick() {
     clearInterval(pulseIntervalId);
     pulseIntervalId = null;
     state.pulseRunning = false;
-    state.pulseResult = Math.round((state.pulseTaps / state.pulseDuration) * 60);
+    if (state.pulseMode === "count") {
+      // en este modo el atleta cuenta de memoria sin tocar la pantalla — recién al
+      // terminar el cronómetro carga cuántos latidos sintió y ahí se calcula el bpm.
+      state.pulseAwaitingCount = true;
+    } else {
+      state.pulseResult = Math.round((state.pulseTaps / state.pulseDuration) * 60);
+    }
   }
   render();
 }
@@ -1202,10 +1211,22 @@ function renderPulseTool() {
           <button class="btn-outline-block" style="width:auto;padding:11px 20px;" data-action="pulseReset">Medir de nuevo</button>
         </div>
       </div>`;
+  } else if (state.pulseAwaitingCount) {
+    body = `
+      <div style="text-align:center;padding:8px 0;">
+        <div style="font-size:13px;margin-bottom:14px;">¿Cuántas pulsaciones contaste en ${state.pulseDuration} segundos?</div>
+        <input class="ob-text" type="text" inputmode="numeric" data-bind="toolPulseManualCount" value="${esc(state.toolPulseManualCount)}" placeholder="Ej: ${Math.round((70 * state.pulseDuration) / 60)}" style="max-width:140px;text-align:center;font-size:18px;font-weight:800;margin:0 auto 16px;">
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+          <button class="btn-accent" style="width:auto;padding:11px 20px;margin:0;" data-action="pulseSubmitCount">Calcular</button>
+          <button class="btn-outline-block" style="width:auto;padding:11px 20px;" data-action="pulseCancel">Cancelar</button>
+        </div>
+      </div>`;
   } else if (state.pulseRunning) {
     const elapsed = Math.min(state.pulseDuration, (Date.now() - state.pulseStartedAt) / 1000);
     const remaining = Math.max(0, Math.ceil(state.pulseDuration - elapsed));
-    body = `
+    body =
+      state.pulseMode === "tap"
+        ? `
       <div style="text-align:center;padding:4px 0;">
         <div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">Tocá el círculo cada vez que sientas un latido en la muñeca o el cuello.</div>
         <button type="button" data-action="pulseTap" style="all:unset;box-sizing:border-box;cursor:pointer;width:150px;height:150px;border-radius:50%;background:color-mix(in oklch, var(--accent) 16%, var(--surface2));border:3px solid var(--accent);display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto;">
@@ -1214,11 +1235,24 @@ function renderPulseTool() {
         </button>
         <div style="font-size:22px;font-weight:800;margin-top:16px;">${remaining}s</div>
         <button class="btn-outline-block" style="width:auto;padding:9px 18px;margin-top:14px;" data-action="pulseCancel">Cancelar</button>
+      </div>`
+        : `
+      <div style="text-align:center;padding:20px 0;">
+        <div style="font-size:12.5px;color:var(--muted);margin-bottom:18px;">Contá tus pulsaciones en la muñeca o el cuello sin tocar la pantalla. Al terminar el tiempo te vamos a pedir el total.</div>
+        <div style="width:150px;height:150px;border-radius:50%;background:color-mix(in oklch, var(--accent) 16%, var(--surface2));border:3px solid var(--accent);display:flex;align-items:center;justify-content:center;margin:0 auto;">
+          <div style="font-size:44px;font-weight:800;color:var(--accent);">${remaining}s</div>
+        </div>
+        <button class="btn-outline-block" style="width:auto;padding:9px 18px;margin-top:18px;" data-action="pulseCancel">Cancelar</button>
       </div>`;
   } else {
     body = `
       <div style="font-size:12.5px;color:var(--muted);line-height:1.6;margin-bottom:16px;">
         Medila apenas te despertás, antes de levantarte de la cama y mientras estás quieto/a: apoyá dos dedos (no el pulgar) sobre la muñeca o el costado del cuello hasta sentir el pulso.
+      </div>
+      <div class="ob-label">MODO DE CONTEO</div>
+      <div class="ob-opts" style="margin-bottom:16px;max-width:420px;">
+        <button class="ob-opt-btn ${state.pulseMode === "tap" ? "active" : ""}" data-action="pulseSetMode" data-mode="tap">Tocar la pantalla en cada latido</button>
+        <button class="ob-opt-btn ${state.pulseMode === "count" ? "active" : ""}" data-action="pulseSetMode" data-mode="count">Contar sin tocar la pantalla</button>
       </div>
       <div class="ob-label">DURACIÓN DE LA MEDICIÓN</div>
       <div class="ob-opts" style="margin-bottom:16px;max-width:320px;">
@@ -2097,6 +2131,10 @@ const ACTIONS = {
     if (state.pulseRunning) return;
     setState({ pulseDuration: parseInt(el.dataset.sec, 10), pulseResult: null, pulseSaved: false });
   },
+  pulseSetMode: (el) => {
+    if (state.pulseRunning) return;
+    setState({ pulseMode: el.dataset.mode, pulseResult: null, pulseSaved: false, pulseAwaitingCount: false });
+  },
   pulseStart: () => {
     if (pulseIntervalId) clearInterval(pulseIntervalId);
     state.pulseRunning = true;
@@ -2104,20 +2142,27 @@ const ACTIONS = {
     state.pulseTaps = 0;
     state.pulseResult = null;
     state.pulseSaved = false;
+    state.pulseAwaitingCount = false;
+    state.toolPulseManualCount = "";
     pulseIntervalId = setInterval(pulseTick, 150);
     render();
   },
   pulseTap: () => {
-    if (!state.pulseRunning) return;
+    if (!state.pulseRunning || state.pulseMode !== "tap") return;
     state.pulseTaps++;
     render();
+  },
+  pulseSubmitCount: () => {
+    const count = parseInt(state.toolPulseManualCount, 10);
+    if (!Number.isFinite(count) || count <= 0) return;
+    setState({ pulseResult: Math.round((count / state.pulseDuration) * 60), pulseAwaitingCount: false, pulseSaved: false });
   },
   pulseCancel: () => {
     if (pulseIntervalId) clearInterval(pulseIntervalId);
     pulseIntervalId = null;
-    setState({ pulseRunning: false, pulseStartedAt: null, pulseTaps: 0, pulseResult: null, pulseSaved: false });
+    setState({ pulseRunning: false, pulseStartedAt: null, pulseTaps: 0, pulseResult: null, pulseSaved: false, pulseAwaitingCount: false, toolPulseManualCount: "" });
   },
-  pulseReset: () => setState({ pulseResult: null, pulseSaved: false, pulseTaps: 0 }),
+  pulseReset: () => setState({ pulseResult: null, pulseSaved: false, pulseTaps: 0, pulseAwaitingCount: false, toolPulseManualCount: "" }),
   pulseUseResult: () => {
     if (state.pulseResult == null) return;
     setProfile({ fcRest: String(state.pulseResult) });
