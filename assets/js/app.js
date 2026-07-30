@@ -1286,28 +1286,28 @@ const TECNICA_CONTENT = {
   piernas: {
     label: "Piernas",
     tips: [
-      { title: "Aterrizaje", text: "Apoyá el pie debajo del centro de gravedad, no adelante del cuerpo, en la mitad del pie. Aterrizar muy adelantado frena la zancada y aumenta el impacto en la rodilla." },
-      { title: "Cadencia", text: "Apuntá a unos 170-180 pasos por minuto. Pasos más cortos y rápidos reducen la carga en articulaciones frente a zancadas largas y lentas." },
-      { title: "Empuje", text: "Extendé la cadera hacia atrás en el despegue en vez de \"tirar\" la pierna hacia adelante — el impulso sale de atrás, no de estirar el paso." },
-      { title: "Rodilla", text: "Dejá que se flexione naturalmente al aterrizar, absorbiendo el impacto como un resorte. Una pierna rígida transmite todo el golpe hacia arriba." },
+      { title: "Dónde pisar", text: "Pisá con el pie debajo tuyo, no muy adelante del cuerpo. Si pisás lejos, frenás el paso y le pegás más fuerte a la rodilla." },
+      { title: "Pasos cortos y rápidos", text: "Dá pasos cortos y rápidos (más o menos 170-180 por minuto) en vez de pasos largos y lentos. Así cuidás más las rodillas y los tobillos." },
+      { title: "De dónde sale la fuerza", text: "El impulso para avanzar sale de empujar hacia atrás con la cadera, no de estirar la pierna hacia adelante." },
+      { title: "Rodilla suelta", text: "Dejá que la rodilla se doble sola al pisar, como un resorte. Si la ponés dura y estirada, todo el golpe sube directo a la rodilla." },
     ],
   },
   brazos: {
     label: "Brazos",
     tips: [
-      { title: "Ángulo de codo", text: "Mantené los codos en un ángulo de aproximadamente 90°, relajados, sin apretar los puños ni llevarlos muy pegados al cuerpo." },
-      { title: "Movimiento", text: "El brazo se mueve de adelante hacia atrás, acompañando el ritmo de las piernas — evitá que crucen el centro del cuerpo, eso desperdicia energía." },
-      { title: "Hombros", text: "Mantenelos bajos y relajados. Es común elevarlos hacia las orejas en subidas o al final de carreras largas — revisalo cada tanto." },
-      { title: "Función", text: "Los brazos ayudan a mantener el equilibrio y el ritmo, sobre todo en cuestas y sprints: un braceo más enérgico puede ayudarte a acelerar la cadencia." },
+      { title: "Codos doblados", text: "Doblá los codos casi en escuadra (90°) y relajados. No cierres fuerte los puños." },
+      { title: "Adelante y atrás", text: "Movés los brazos de adelante hacia atrás, siguiendo el ritmo de las piernas. Evitá que crucen hacia el otro lado del cuerpo, porque ahí gastás energía de más." },
+      { title: "Hombros sueltos", text: "Los hombros van abajo y relajados. Cuando te cansás (en una subida o al final de una carrera larga) tendés a subirlos hacia las orejas — fijate cada tanto y bajalos." },
+      { title: "Para qué sirven", text: "Los brazos te ayudan a mantener el equilibrio y el ritmo. Si los movés más fuerte, las piernas te siguen y corrés más rápido — útil en subidas o en un final de carrera." },
     ],
   },
   respiracion: {
     label: "Respiración",
     tips: [
-      { title: "Patrón", text: "Probá una relación 3:2 (3 pasos inhalando, 2 exhalando) en ritmos suaves, y 2:1 en ritmos más exigentes." },
-      { title: "Respiración abdominal", text: "Respirá con el diafragma (el abdomen se expande), no solo con el pecho, para aprovechar mejor cada respiración." },
-      { title: "Nariz y boca", text: "Combiná ambas vías para maximizar el ingreso de aire, sobre todo a intensidades altas donde solo la nariz no alcanza." },
-      { title: "Relajación", text: "Una mandíbula y hombros relajados ayudan a respirar con más soltura — la tensión en la cara suele contagiarse a la respiración." },
+      { title: "Ritmo para respirar", text: "En ritmo suave, probá inhalar durante 3 pasos y exhalar en 2. Si vas más rápido, cambiá a 2 pasos inhalando y 1 exhalando." },
+      { title: "Respirá con la panza", text: "Respirá inflando la panza, no solo el pecho. Así entra más aire en cada respiración." },
+      { title: "Nariz y boca juntas", text: "Respirá por la nariz y la boca al mismo tiempo. Cuando vas fuerte, solo con la nariz no te alcanza el aire." },
+      { title: "Relajate", text: "Si tenés la cara y los hombros tensos, te cuesta más respirar. Aflojá la mandíbula y los hombros mientras corrés." },
     ],
   },
 };
@@ -1440,6 +1440,7 @@ function renderTecnicaCarrera() {
   const content = TECNICA_CONTENT[t];
   return `
     <div class="perfil-panel">
+      <div style="font-size:11.5px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:18px;">Muy pronto vas a poder ver acá videos cortos con distintas formas de trabajar cada técnica. Por ahora, estas son las indicaciones en texto.</div>
       <div class="ob-opts" style="margin-bottom:18px;max-width:460px;">
         ${Object.entries(TECNICA_CONTENT).map(([k, v]) => `<button class="ob-opt-btn ${t === k ? "active" : ""}" data-action="setTecnicaSubTab" data-tab="${k}">${v.label}</button>`).join("")}
       </div>
