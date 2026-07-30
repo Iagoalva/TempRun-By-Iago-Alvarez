@@ -34,6 +34,7 @@ const ICONS = {
   flame: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 2c1 4-4 5-4 9a4 4 0 0 0 8 0c1.5 1 2 2.6 2 4a6 6 0 1 1-12 0c0-5 3-6 4-9 .5 2 1.5 2 2 0z" fill="currentColor"/></svg>`,
   pulseWave: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M2 12h4l2-7 4 14 2-9 2 5h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   calculator: `<svg viewBox="0 0 24 24" width="16" height="16"><rect x="4" y="2" width="16" height="20" rx="2" fill="none" stroke="var(--accent)" stroke-width="1.6"/><line x1="7" y1="6" x2="17" y2="6" stroke="var(--accent)" stroke-width="1.6"/><circle cx="7.5" cy="12" r="1" fill="var(--accent)"/><circle cx="12" cy="12" r="1" fill="var(--accent)"/><circle cx="16.5" cy="12" r="1" fill="var(--accent)"/><circle cx="7.5" cy="16.5" r="1" fill="var(--accent)"/><circle cx="12" cy="16.5" r="1" fill="var(--accent)"/><circle cx="16.5" cy="16.5" r="1" fill="var(--accent)"/></svg>`,
+  rutinas: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="4" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 6.5v6l-4 7M12 12.5l4 7M8 10l4-2 4 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 function sessionIcon(typeTag) {
   return typeTag === "CUESTAS" ? ICONS.mountain : ICONS.lightning;
@@ -169,6 +170,11 @@ function defaultProfileState() {
     membershipHistory: [], // [{ id, fileName, uploadedAt: "YYYY-MM-DD", status: "Pendiente de revisión" }]
     // actividad diaria fuera del running, para estimar el gasto calórico total (TDEE)
     activityLevel: "moderada", // sedentaria | moderada | activa
+    // apto físico: certificado subido por el atleta, guardado como data URL para poder
+    // mostrar una vista previa real (imagen o link a PDF) sin depender de un backend.
+    fitnessCertFileName: "",
+    fitnessCertDataUrl: "",
+    fitnessCertUploadedAt: "",
   };
 }
 
@@ -194,6 +200,10 @@ let state = {
   theme: "dark",
   athleteTab: "panel",
   perfilTab: "datos", // datos | carreras | fisiologia | salud | membresia
+  rutinasSubTab: "tecnica", // tecnica | elongacion
+  tecnicaSubTab: "piernas", // piernas | brazos | respiracion
+  elongacionSide: "frente", // frente | espalda
+  elongacionZone: null,
   weekIndex: 0,
   expandedKey: null,
   selectedDayIdx: null,
@@ -854,6 +864,7 @@ function renderApp() {
     { key: "plan", icon: ICONS.plan, label: "Plan" },
     { key: "chat", icon: ICONS.chatNav, label: "Chat" },
     { key: "tools", icon: ICONS.tools, label: "Herramientas" },
+    { key: "rutinas", icon: ICONS.rutinas, label: "Rutinas" },
     { key: "perfil", icon: ICONS.perfil, label: "Perfil" },
   ];
 
@@ -886,6 +897,7 @@ function renderApp() {
         ${state.athleteTab === "plan" ? renderPlan(m) : ""}
         ${state.athleteTab === "chat" ? renderChatTab() : ""}
         ${state.athleteTab === "tools" ? renderToolsTab() : ""}
+        ${state.athleteTab === "rutinas" ? renderRutinasTab() : ""}
         ${state.athleteTab === "perfil" ? renderPerfil() : ""}
       </div>
     </main>
@@ -1268,6 +1280,203 @@ function renderGlossaryTool() {
     </div>`;
 }
 
+/* ---------------- RUTINAS: técnica de carrera + zona de elongación ---------------- */
+
+const TECNICA_CONTENT = {
+  piernas: {
+    label: "Piernas",
+    tips: [
+      { title: "Aterrizaje", text: "Apoyá el pie debajo del centro de gravedad, no adelante del cuerpo, en la mitad del pie. Aterrizar muy adelantado frena la zancada y aumenta el impacto en la rodilla." },
+      { title: "Cadencia", text: "Apuntá a unos 170-180 pasos por minuto. Pasos más cortos y rápidos reducen la carga en articulaciones frente a zancadas largas y lentas." },
+      { title: "Empuje", text: "Extendé la cadera hacia atrás en el despegue en vez de \"tirar\" la pierna hacia adelante — el impulso sale de atrás, no de estirar el paso." },
+      { title: "Rodilla", text: "Dejá que se flexione naturalmente al aterrizar, absorbiendo el impacto como un resorte. Una pierna rígida transmite todo el golpe hacia arriba." },
+    ],
+  },
+  brazos: {
+    label: "Brazos",
+    tips: [
+      { title: "Ángulo de codo", text: "Mantené los codos en un ángulo de aproximadamente 90°, relajados, sin apretar los puños ni llevarlos muy pegados al cuerpo." },
+      { title: "Movimiento", text: "El brazo se mueve de adelante hacia atrás, acompañando el ritmo de las piernas — evitá que crucen el centro del cuerpo, eso desperdicia energía." },
+      { title: "Hombros", text: "Mantenelos bajos y relajados. Es común elevarlos hacia las orejas en subidas o al final de carreras largas — revisalo cada tanto." },
+      { title: "Función", text: "Los brazos ayudan a mantener el equilibrio y el ritmo, sobre todo en cuestas y sprints: un braceo más enérgico puede ayudarte a acelerar la cadencia." },
+    ],
+  },
+  respiracion: {
+    label: "Respiración",
+    tips: [
+      { title: "Patrón", text: "Probá una relación 3:2 (3 pasos inhalando, 2 exhalando) en ritmos suaves, y 2:1 en ritmos más exigentes." },
+      { title: "Respiración abdominal", text: "Respirá con el diafragma (el abdomen se expande), no solo con el pecho, para aprovechar mejor cada respiración." },
+      { title: "Nariz y boca", text: "Combiná ambas vías para maximizar el ingreso de aire, sobre todo a intensidades altas donde solo la nariz no alcanza." },
+      { title: "Relajación", text: "Una mandíbula y hombros relajados ayudan a respirar con más soltura — la tensión en la cara suele contagiarse a la respiración." },
+    ],
+  },
+};
+
+// Coordenadas sobre un viewBox de 200x420 (silueta simple, no anatómica al detalle).
+// Los pares [x,y] representan lado izquierdo/derecho para zonas simétricas.
+const ELONGATION_ZONES = {
+  frente: [
+    { key: "cuello", label: "Cuello (Cervicales)", desc: "Libera la tensión acumulada en hombros y nuca durante la carrera.", points: [[100, 55]], stretches: [
+      { name: "Inclinación lateral de cuello", intensity: "Suave", duration: "20-30s por lado", text: "Sentado o de pie, inclinná la cabeza llevando la oreja hacia el hombro sin levantarlo. Repetí del otro lado." },
+      { name: "Rotación de cuello asistida", intensity: "Medio", duration: "20s por lado", text: "Con la mano opuesta, ayudá suavemente a inclinar la cabeza un poco más, sintiendo el estiramiento en el lateral del cuello." },
+    ] },
+    { key: "hombros-pecho", label: "Hombros y pecho", desc: "Abre la caja torácica para mejorar la capacidad respiratoria.", points: [[100, 95]], stretches: [
+      { name: "Estiramiento de pecho en marco/pared", intensity: "Suave", duration: "20-30s por lado", text: "Apoyá el antebrazo en un marco de puerta o pared y girá el torso hacia el lado contrario, sintiendo el estiramiento en el pecho." },
+      { name: "Cruce de brazo (hombro posterior)", intensity: "Suave", duration: "20-30s por lado", text: "Llevá un brazo estirado cruzando el pecho y sostenelo con el otro brazo a la altura del codo." },
+    ] },
+    { key: "abdominales-psoas", label: "Abdominales y Psoas", desc: "Estira el \"core\" y el psoas, muy cargados al correr.", points: [[100, 160]], stretches: [
+      { name: "Extensión de tronco boca abajo", intensity: "Suave", duration: "20-30s", text: "Acostado boca abajo, apoyá los antebrazos y levantá el pecho suavemente, sintiendo el estiramiento en el abdomen." },
+      { name: "Estocada con extensión de cadera", intensity: "Medio", duration: "20-30s por lado", text: "Desde una zancada larga (rodilla de atrás apoyada), empujá la cadera hacia adelante y llevá el brazo del mismo lado hacia arriba para estirar el psoas." },
+    ] },
+    { key: "aductores-ingle", label: "Aductores (Ingle)", desc: "Mejora la movilidad de cadera y evita pubalgias.", points: [[100, 195]], stretches: [
+      { name: "Estiramiento de mariposa sentado", intensity: "Suave", duration: "30s", text: "Sentado, juntá las plantas de los pies y dejá caer las rodillas hacia los costados, inclinando el torso levemente adelante." },
+      { name: "Sentadilla de sumo lateral", intensity: "Medio", duration: "20-30s por lado", text: "Piernas bien abiertas, desplazá el peso hacia un lado flexionando esa rodilla y manteniendo la otra pierna estirada." },
+    ] },
+    { key: "cuadriceps", label: "Cuádriceps", desc: "Fundamental después de rodajes largos o cuestas.", points: [[78, 250], [122, 250]], stretches: [
+      { name: "Estiramiento de cuádriceps de pie", intensity: "Suave", duration: "20-30s por lado", text: "De pie, llevá el talón hacia el glúteo sosteniendo el pie con la mano, rodillas juntas y cadera hacia adelante." },
+      { name: "Estocada baja con talón elevado", intensity: "Medio", duration: "20-30s por lado", text: "Desde una zancada, apoyá el empeine de atrás en el piso o elevado y empujá la cadera hacia adelante." },
+    ] },
+    { key: "tibiales-empeine", label: "Tibiales y empeine", desc: "Alivia la tensión en la parte frontal de la pierna.", points: [[78, 340], [122, 340]], stretches: [
+      { name: "Estiramiento de empeine arrodillado", intensity: "Suave", duration: "20-30s por lado", text: "Arrodillado, sentate levemente sobre los talones con el empeine apoyado en el piso, sintiendo el estiramiento en la parte frontal del tobillo." },
+      { name: "Elevación de talón contra pared", intensity: "Suave", duration: "20-30s por lado", text: "De pie, apoyá los dedos del pie contra la base de una pared con el talón en el piso, inclinando el cuerpo levemente hacia adelante." },
+    ] },
+  ],
+  espalda: [
+    { key: "espalda-alta-dorsales", label: "Espalda alta y dorsales", desc: "Relaja la tensión postural del braceo.", points: [[100, 95]], stretches: [
+      { name: "Abrazo a uno mismo", intensity: "Suave", duration: "20-30s", text: "Cruzá los brazos abrazándote y redondeá la espalda alta, alejando los omóplatos entre sí." },
+      { name: "Estiramiento de dorsales en cuadrupedia", intensity: "Medio", duration: "20-30s por lado", text: "En cuatro apoyos, llevá una mano bien adelante y hacia el lado contrario, bajando el pecho hacia el piso." },
+    ] },
+    { key: "lumbar", label: "Zona Lumbar", desc: "Descomprime la columna baja tras el impacto.", points: [[100, 165]], stretches: [
+      { name: "Rodillas al pecho", intensity: "Suave", duration: "20-30s", text: "Acostado boca arriba, llevá ambas rodillas hacia el pecho y abrazalas suavemente." },
+      { name: "Torsión de columna acostado", intensity: "Medio", duration: "20-30s por lado", text: "Acostado boca arriba, llevá las rodillas juntas hacia un costado manteniendo los hombros apoyados en el piso." },
+    ] },
+    { key: "gluteos-piramidal", label: "Glúteos y piramidal", desc: "CRÍTICO para evitar ciática y síndrome piramidal.", points: [[82, 205], [118, 205]], stretches: [
+      { name: "Figura 4 acostado", intensity: "Suave", duration: "20-30s por lado", text: "Acostado boca arriba, cruzá un tobillo sobre la rodilla contraria y llevá esa pierna hacia el pecho." },
+      { name: "Estiramiento de piramidal sentado", intensity: "Medio", duration: "20-30s por lado", text: "Sentado, cruzá un tobillo sobre la rodilla contraria e inclinate hacia adelante manteniendo la espalda recta." },
+    ] },
+    { key: "isquiotibiales", label: "Isquiotibiales", desc: "El músculo que más se acorta en corredores.", points: [[80, 255], [120, 255]], stretches: [
+      { name: "Estiramiento de isquios sentado", intensity: "Suave", duration: "20-30s por lado", text: "Sentado con una pierna estirada y la otra flexionada, inclinate hacia adelante desde la cadera manteniendo la espalda recta." },
+      { name: "Isquios con pierna elevada", intensity: "Medio", duration: "20-30s por lado", text: "Acostado boca arriba, elevá una pierna estirada y sostenela con las manos o una toalla, llevándola hacia el pecho." },
+    ] },
+    { key: "gemelos-soleo", label: "Gemelos y Sóleo", desc: "Descarga la musculatura impulsora y protege el Aquiles.", points: [[80, 335], [120, 335]], stretches: [
+      { name: "Estiramiento de gemelo contra pared", intensity: "Suave", duration: "20-30s por lado", text: "De pie frente a una pared, una pierna atrás bien estirada con el talón en el piso, inclinate hacia adelante." },
+      { name: "Estiramiento de sóleo con rodilla flexionada", intensity: "Medio", duration: "20-30s por lado", text: "Misma posición que el gemelo, pero flexionando la rodilla de atrás sin levantar el talón, para llegar al sóleo." },
+    ] },
+  ],
+};
+
+function renderBodySilhouette(side, selectedZone) {
+  const zones = ELONGATION_ZONES[side];
+  const dots = zones
+    .flatMap((z) => z.points.map((p) => ({ ...z, x: p[0], y: p[1] })))
+    .map(
+      (d) => `
+      <circle class="elong-dot ${selectedZone === d.key ? "active" : ""}" cx="${d.x}" cy="${d.y}" r="${selectedZone === d.key ? 9 : 7}" data-action="selectElongationZone" data-zone="${d.key}"><title>${esc(d.label)}</title></circle>`
+    )
+    .join("");
+  return `
+    <svg viewBox="0 0 200 420" width="230" height="480" style="overflow:visible;">
+      <circle cx="100" cy="28" r="20" fill="none" stroke="var(--muted)" stroke-width="2"/>
+      <line x1="100" y1="48" x2="100" y2="58" stroke="var(--muted)" stroke-width="2"/>
+      <path d="M65,60 Q100,52 135,60 L130,185 Q100,196 70,185 Z" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M65,65 L35,150 L30,210" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M135,65 L165,150 L170,210" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M72,185 L60,270 L55,390" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M128,185 L140,270 L145,390" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="42" y1="392" x2="66" y2="392" stroke="var(--muted)" stroke-width="2" stroke-linecap="round"/>
+      <line x1="134" y1="392" x2="158" y2="392" stroke="var(--muted)" stroke-width="2" stroke-linecap="round"/>
+      ${dots}
+    </svg>`;
+}
+
+function renderElongacionInfo(side, selectedZoneKey) {
+  const zone = ELONGATION_ZONES[side].find((z) => z.key === selectedZoneKey);
+  if (!zone) {
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center;padding:40px 20px;color:var(--muted);">
+        <div style="width:64px;height:64px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;margin-bottom:16px;">${ICONS.lightning.replace('width="19" height="19"', 'width="24" height="24"')}</div>
+        <div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:6px;">Guía de Elongación</div>
+        <div style="font-size:12.5px;">Selecciona una zona muscular en la silueta para ver los estiramientos recomendados.</div>
+      </div>`;
+  }
+  return `
+    <div>
+      <div style="font-size:17px;font-weight:800;font-style:italic;margin-bottom:6px;">${esc(zone.label)}</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:20px;">${esc(zone.desc)}</div>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        ${zone.stretches
+          .map(
+            (st) => `
+          <div class="metric-card" style="text-align:left;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
+              <div style="font-size:13px;font-weight:800;font-style:normal;">${esc(st.name)}</div>
+              <span style="font-size:9.5px;font-weight:700;letter-spacing:0.3px;padding:3px 8px;border-radius:6px;white-space:nowrap;background:${st.intensity === "Suave" ? "color-mix(in oklch, var(--good) 20%, transparent)" : "color-mix(in oklch, var(--warn) 22%, transparent)"};color:${st.intensity === "Suave" ? "var(--good)" : "var(--warn)"};">${st.intensity.toUpperCase()}</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--muted);font-weight:400;font-style:normal;margin-bottom:6px;">${esc(st.text)}</div>
+            <div style="font-size:10.5px;color:var(--accent);font-weight:700;font-style:normal;">${esc(st.duration)}</div>
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>`;
+}
+
+function renderRutinasTab() {
+  const sub = state.rutinasSubTab;
+  return `
+    <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Rutinas</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:22px;">Técnica de carrera y guía de elongación.</div>
+
+    <div class="perfil-tabs" style="margin-bottom:20px;">
+      <button class="perfil-tab-btn ${sub === "tecnica" ? "active" : ""}" data-action="setRutinasSubTab" data-tab="tecnica">TÉCNICA DE CARRERA</button>
+      <button class="perfil-tab-btn ${sub === "elongacion" ? "active" : ""}" data-action="setRutinasSubTab" data-tab="elongacion">ZONA DE ELONGACIÓN</button>
+    </div>
+
+    ${sub === "tecnica" ? renderTecnicaCarrera() : renderZonaElongacion()}`;
+}
+
+function renderTecnicaCarrera() {
+  const t = state.tecnicaSubTab;
+  const content = TECNICA_CONTENT[t];
+  return `
+    <div class="perfil-panel">
+      <div class="ob-opts" style="margin-bottom:18px;max-width:460px;">
+        ${Object.entries(TECNICA_CONTENT).map(([k, v]) => `<button class="ob-opt-btn ${t === k ? "active" : ""}" data-action="setTecnicaSubTab" data-tab="${k}">${v.label}</button>`).join("")}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        ${content.tips
+          .map(
+            (tip) => `
+          <div class="metric-card" style="text-align:left;">
+            <div style="font-size:13px;font-weight:800;font-style:normal;color:var(--accent);margin-bottom:5px;">${esc(tip.title)}</div>
+            <div style="font-size:12.5px;color:var(--text);font-weight:400;font-style:normal;line-height:1.5;">${esc(tip.text)}</div>
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>`;
+}
+
+function renderZonaElongacion() {
+  const side = state.elongacionSide;
+  return `
+    <div class="perfil-panel" style="padding:0;overflow:hidden;">
+      <div style="background:linear-gradient(135deg, color-mix(in oklch, var(--pink) 18%, var(--surface)), var(--surface));padding:20px 26px;border-bottom:1px solid var(--border);">
+        <div style="font-size:22px;font-weight:800;font-style:italic;">ZONA DE <span style="color:var(--pink);">ELONGACIÓN</span></div>
+        <div style="font-size:10.5px;font-weight:700;letter-spacing:0.6px;color:var(--muted);margin-top:4px;">FLEXIBILIDAD &amp; RECUPERACIÓN</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+        <div style="padding:24px;border-right:1px solid var(--border);position:relative;display:flex;flex-direction:column;align-items:center;">
+          <button class="btn-outline-block" style="width:auto;padding:8px 16px;font-size:11.5px;position:absolute;top:20px;right:20px;display:flex;align-items:center;gap:6px;" data-action="toggleElongacionSide">${ICONS.refresh} ${side === "frente" ? "ESPALDA" : "FRENTE"}</button>
+          <div style="margin-top:36px;">${renderBodySilhouette(side, state.elongacionZone)}</div>
+        </div>
+        <div style="padding:24px;">
+          ${renderElongacionInfo(side, state.elongacionZone)}
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderPulseTool() {
   const durations = [15, 30, 60];
   let body;
@@ -1366,8 +1575,7 @@ function renderPerfilFisiologia(s) {
     return `
       <div class="perfil-panel" style="max-width:560px;margin-bottom:22px;">
         <div style="font-size:13px;color:var(--muted);">Cargá tu peso y altura en <b style="color:var(--text);">Mis Datos</b> para ver acá tu IMC, gasto calórico, composición y zonas de FC.</div>
-      </div>
-      ${renderMyMarks(s)}`;
+      </div>`;
   }
 
   const metabolicBadge = metabolicAge == null ? "" : metabolicAge < age ? "EXCELENTE" : metabolicAge === age ? "ESPERABLE" : "A TRABAJAR";
@@ -1456,9 +1664,7 @@ function renderPerfilFisiologia(s) {
       </div>
     </div>
 
-    <div style="font-size:10.5px;color:var(--muted);margin:-10px 0 22px;line-height:1.5;">IMC, gasto calórico y edad metabólica son estimaciones orientativas calculadas con tus propios datos (peso, altura, FC en reposo y volumen de entrenamiento) — no reemplazan una evaluación médica.</div>
-
-    ${renderMyMarks(s)}`;
+    <div style="font-size:10.5px;color:var(--muted);margin:-10px 0 22px;line-height:1.5;">IMC, gasto calórico y edad metabólica son estimaciones orientativas calculadas con tus propios datos (peso, altura, FC en reposo y volumen de entrenamiento) — no reemplazan una evaluación médica.</div>`;
 }
 
 const MARK_DISTS = [
@@ -1574,7 +1780,7 @@ function renderPerfil() {
   const tab = state.perfilTab || "datos";
   const bodies = {
     datos: renderPerfilDatos(s),
-    carreras: renderRaceLog(s),
+    carreras: renderMyMarks(s) + renderRaceLog(s),
     fisiologia: renderPerfilFisiologia(s),
     salud: renderPerfilSalud(s),
     membresia: renderPerfilMembresia(s),
@@ -1586,7 +1792,7 @@ function renderPerfil() {
     </div>
     ${bodies[tab] || bodies.datos}
     <div style="margin-top:32px;max-width:420px;">
-      <button class="btn-outline-block" style="padding:16px 0;font-size:15.5px;" data-action="logout">Cerrar sesión</button>
+      <button class="logout-btn-lg" style="padding:16px 0;font-size:15.5px;" data-action="logout">Cerrar sesión</button>
     </div>`;
 }
 
@@ -1675,7 +1881,40 @@ function renderPerfilDatos(s) {
 }
 
 function renderPerfilSalud(s) {
+  const hasCert = !!s.fitnessCertDataUrl;
+  const isImage = hasCert && s.fitnessCertDataUrl.startsWith("data:image");
+  const isPdf = hasCert && s.fitnessCertDataUrl.startsWith("data:application/pdf");
   return `
+    <div class="perfil-panel" style="max-width:640px;margin-bottom:20px;">
+      <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} ANTECEDENTES DE SALUD</div>
+      <div style="font-size:12px;color:var(--muted);margin:-10px 0 14px;">Cirugías, lesiones previas, asma, condiciones cardíacas, alergias, medicación habitual, etc.</div>
+      <textarea class="ob-textarea" style="min-height:100px;" data-bind="profile.healthNotes" placeholder="Contanos tus antecedentes de salud relevantes...">${esc(s.healthNotes)}</textarea>
+    </div>
+
+    <div class="perfil-panel" style="max-width:640px;margin-bottom:20px;">
+      <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} APTO FÍSICO</div>
+      <div style="font-size:12px;color:var(--muted);margin:-10px 0 14px;">Subí tu certificado de apto físico vigente (foto o PDF).</div>
+      <input type="file" id="fitness-cert-input" accept="image/*,.pdf" style="display:none;" data-action="fitnessCertFileSelected">
+      ${
+        hasCert
+          ? `<div class="membership-history-row" style="margin-bottom:12px;">
+               <div>
+                 <div style="font-size:12.5px;font-weight:700;">${esc(s.fitnessCertFileName)}</div>
+                 <div style="font-size:11px;color:var(--muted);margin-top:2px;">Subido el ${formatDateShort(s.fitnessCertUploadedAt)}</div>
+               </div>
+               <button type="button" class="race-del-btn" data-action="fitnessCertRemove" title="Eliminar">${ICONS.raceClose}</button>
+             </div>
+             ${
+               isImage
+                 ? `<img src="${s.fitnessCertDataUrl}" alt="Apto físico" style="max-width:100%;max-height:320px;border-radius:10px;border:1px solid var(--border);display:block;">`
+                 : isPdf
+                 ? `<a href="${s.fitnessCertDataUrl}" target="_blank" rel="noopener" class="membership-upload-btn" style="border-style:solid;">${ICONS.upload} Ver PDF</a>`
+                 : ""
+             }`
+          : `<button type="button" class="membership-upload-btn" data-action="fitnessCertUploadClick">${ICONS.upload} Subir apto físico</button>`
+      }
+    </div>
+
     <div class="perfil-panel" style="max-width:640px;">
       <div class="perfil-panel-heading">${ICONS.lightning.replace('width="19" height="19"', 'width="16" height="16"')} CONTEXTO DE SALUD Y EXPERIENCIA</div>
       <div style="font-size:12px;color:var(--muted);margin:-10px 0 18px;">Esto es lo que usamos para calcular tu nivel. Actualizalo si algo cambió (por ejemplo, una lesión).</div>
@@ -2117,6 +2356,18 @@ function bindDynamicListeners() {
       el.value = "";
     });
   });
+  root.querySelectorAll('[data-action="fitnessCertFileSelected"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      const file = el.files && el.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setProfile({ fitnessCertFileName: file.name, fitnessCertDataUrl: reader.result, fitnessCertUploadedAt: new Date().toISOString().slice(0, 10) });
+      };
+      reader.readAsDataURL(file);
+      el.value = "";
+    });
+  });
   root.querySelectorAll('[data-action="athleteMessageInput"]').forEach((el) => {
     el.addEventListener("input", () => {
       const accounts = loadAccounts();
@@ -2471,6 +2722,15 @@ const ACTIONS = {
     const el = document.getElementById("membership-file-input");
     if (el) el.click();
   },
+  fitnessCertUploadClick: () => {
+    const el = document.getElementById("fitness-cert-input");
+    if (el) el.click();
+  },
+  fitnessCertRemove: () => setProfile({ fitnessCertFileName: "", fitnessCertDataUrl: "", fitnessCertUploadedAt: "" }),
+  setRutinasSubTab: (el) => setState({ rutinasSubTab: el.dataset.tab }),
+  setTecnicaSubTab: (el) => setState({ tecnicaSubTab: el.dataset.tab }),
+  toggleElongacionSide: () => setState((s) => ({ elongacionSide: s.elongacionSide === "frente" ? "espalda" : "frente", elongacionZone: null })),
+  selectElongationZone: (el) => setState((s) => ({ elongacionZone: s.elongacionZone === el.dataset.zone ? null : el.dataset.zone })),
   pulseUseResult: () => {
     if (state.pulseResult == null) return;
     setProfile({ fcRest: String(state.pulseResult) });

@@ -951,20 +951,20 @@ button {
   justify-content: center;
   gap: 8px;
   width: 100%;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-weight: 700;
-  font-size: 13.5px;
-  padding: 12px 0;
+  background: color-mix(in oklch, var(--bad) 12%, var(--surface2));
+  border: 1.5px solid var(--bad);
+  color: var(--bad);
+  font-weight: 800;
+  font-size: 14.5px;
+  padding: 14px 0;
   border-radius: 10px;
 }
 .coach-mobile-logout {
   display: none;
 }
 .logout-btn-lg:hover {
-  border-color: var(--bad);
-  color: var(--bad);
+  background: var(--bad);
+  color: #fff;
 }
 
 .athlete-unread-badge {
@@ -1924,6 +1924,30 @@ button {
   align-items: center;
   gap: 12px;
   border: 1px solid;
+}
+
+.elong-dot {
+  fill: var(--surface2);
+  stroke: #fff;
+  stroke-width: 2;
+  cursor: pointer;
+  transition: r 0.1s ease;
+}
+.elong-dot:hover {
+  fill: color-mix(in oklch, var(--pink) 40%, var(--surface2));
+}
+.elong-dot.active {
+  fill: var(--pink);
+  stroke: var(--pink);
+}
+@media (max-width: 900px) {
+  #root .perfil-panel > div[style*="grid-template-columns:1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+  #root .perfil-panel > div[style*="grid-template-columns:1fr 1fr"] > div {
+    border-right: none !important;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 .pbs-list {
