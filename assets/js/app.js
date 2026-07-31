@@ -215,6 +215,9 @@ function defaultProfileState() {
     fitnessCertFileName: "",
     fitnessCertDataUrl: "",
     fitnessCertUploadedAt: "",
+    // el coach lo puede sacar de su lista de atletas sin borrar la cuenta (eso requiere
+    // privilegios de administrador en Supabase) — queda reversible desde "Dados de baja".
+    removedByCoach: false,
   };
 }
 
@@ -260,6 +263,7 @@ let state = {
   coachExpandedKey: null,
   coachChatInput: "",
   coachSearch: "",
+  coachShowRemoved: false,
   coachKmDraft: {}, // { [dayIdx]: texto tal cual lo está tipeando el coach, para no reformatear a mitad de tipeo }
   coachEdgeDraft: {}, // { "[dayIdx]-warmupMinOverride"|"[dayIdx]-cooldownMinOverride": texto tal cual se tipea }
   stravaJustSynced: false,
@@ -2035,7 +2039,14 @@ function renderPerfilMembresia(s) {
 function getAllAthleteAccounts() {
   const accounts = loadAccounts();
   return Object.entries(accounts)
-    .filter(([email, acc]) => acc.role !== "coach" && acc.profile && acc.profile.onboardingDone)
+    .filter(([email, acc]) => acc.role !== "coach" && acc.profile && acc.profile.onboardingDone && !acc.profile.removedByCoach)
+    .map(([email, acc]) => ({ email, acc }));
+}
+
+function getRemovedAthleteAccounts() {
+  const accounts = loadAccounts();
+  return Object.entries(accounts)
+    .filter(([email, acc]) => acc.role !== "coach" && acc.profile && acc.profile.removedByCoach)
     .map(([email, acc]) => ({ email, acc }));
 }
 
@@ -2212,7 +2223,33 @@ function renderCoachRoster(athletes) {
             )
             .join("")}
         </div>`
-    }`;
+    }
+    ${renderRemovedAthletes()}`;
+}
+
+function renderRemovedAthletes() {
+  const removed = getRemovedAthleteAccounts();
+  if (removed.length === 0) return "";
+  const open = !!state.coachShowRemoved;
+  return `
+    <div style="margin-top:20px;">
+      <button data-action="toggleRemovedAthletes" style="all:unset;cursor:pointer;font-size:12px;font-weight:700;color:var(--muted);">Atletas dados de baja (${removed.length}) ${open ? "▴" : "▾"}</button>
+      ${
+        open
+          ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-top:10px;overflow:hidden;">
+          ${removed
+            .map(
+              ({ email, acc }) => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border);font-size:13px;">
+              <span style="font-weight:700;">${esc(acc.profile.fullName || email)}</span>
+              <button class="btn-accent" style="width:auto;padding:7px 14px;margin:0;font-size:12px;" data-action="coachRestoreAthlete" data-email="${esc(email)}">Restaurar</button>
+            </div>`
+            )
+            .join("")}
+        </div>`
+          : ""
+      }
+    </div>`;
 }
 
 // Convierte el markup de las pestañas de Perfil (pensadas para que el propio atleta las
@@ -2257,11 +2294,15 @@ function renderCoachDetail() {
   }));
 
   return `
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;flex-wrap:wrap;">
       <button data-action="backToRoster" style="all:unset;cursor:pointer;width:34px;height:34px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;line-height:32px;">‹</button>
-      <div>
+      <div style="flex:1;min-width:200px;">
         <div style="font-size:24px;font-weight:800;">${esc(profile.fullName || state.selectedAthleteEmail)}</div>
         <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${m.distInfo.label} · ${m.level} · ${m.pct}% adherencia esta semana · ${m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label}</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button style="all:unset;cursor:pointer;font-size:11.5px;font-weight:700;color:var(--warn);background:color-mix(in oklch, var(--warn) 14%, transparent);padding:9px 14px;border-radius:8px;" data-action="coachResetAthleteGoal">Reiniciar objetivo</button>
+        <button style="all:unset;cursor:pointer;font-size:11.5px;font-weight:700;color:var(--bad);background:color-mix(in oklch, var(--bad) 14%, transparent);padding:9px 14px;border-radius:8px;" data-action="coachRemoveAthlete">Quitar atleta</button>
       </div>
     </div>
 
@@ -2954,6 +2995,46 @@ const ACTIONS = {
   backToRoster: () => setState({ coachView: "roster", selectedAthleteEmail: null }),
   coachDetailSetTab: (el) => setState({ coachDetailTab: el.dataset.tab }),
   setCoachPerfilTab: (el) => setState({ coachPerfilTab: el.dataset.tab }),
+  toggleRemovedAthletes: () => setState((s) => ({ coachShowRemoved: !s.coachShowRemoved })),
+  coachResetAthleteGoal: () => {
+    const email = state.selectedAthleteEmail;
+    const accounts = loadAccounts();
+    const acc = accounts[email];
+    if (!acc) return;
+    if (!confirm(`¿Reiniciar el objetivo de ${acc.profile.fullName || email}? Va a tener que volver a definir objetivo, marcas y nivel la próxima vez que entre — hasta que lo haga, no vas a verlo en tu lista de atletas.`)) return;
+    Object.assign(acc.profile, {
+      goalName: "",
+      goalDate: "",
+      weeklyKm: 11,
+      levelAnswers: { q1: "", q2: "", q3: "", q4: "", q5: "", q6: "", q7: "" },
+      pbs: { walk: "", p3k: "", p5k: "", p10k: "" },
+      completed: {},
+      dayOverrides: {},
+      stravaActivities: {},
+      onboardingDone: false,
+    });
+    saveAccounts(accounts);
+    setState({ coachView: "roster", selectedAthleteEmail: null });
+  },
+  coachRemoveAthlete: () => {
+    const email = state.selectedAthleteEmail;
+    const accounts = loadAccounts();
+    const acc = accounts[email];
+    if (!acc) return;
+    if (!confirm(`¿Quitar a ${acc.profile.fullName || email} de tu lista de atletas? No se borra la cuenta ni el progreso — lo podés restaurar después desde "Atletas dados de baja".`)) return;
+    acc.profile.removedByCoach = true;
+    saveAccounts(accounts);
+    setState({ coachView: "roster", selectedAthleteEmail: null });
+  },
+  coachRestoreAthlete: (el) => {
+    const email = el.dataset.email;
+    const accounts = loadAccounts();
+    const acc = accounts[email];
+    if (!acc) return;
+    acc.profile.removedByCoach = false;
+    saveAccounts(accounts);
+    render();
+  },
   coachWeekPrev: () => setState((s) => ({ coachWeekIndex: Math.max(0, (s.coachWeekIndex || 0) - 1), coachExpandedKey: null })),
   coachWeekNext: () => setState((s) => ({ coachWeekIndex: (s.coachWeekIndex || 0) + 1, coachExpandedKey: null })),
   coachJumpWeek: (el) => setState({ coachWeekIndex: parseInt(el.dataset.idx, 10), coachExpandedKey: null }),
