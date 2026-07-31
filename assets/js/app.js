@@ -1092,8 +1092,20 @@ function computeRenderModel(profile, weekIndexParam) {
     totalKm, doneKm, pct, acwrStatus, weeksMeta, fcMax, fcRest, distInfo, monthWeeks,
     phaseLabelShort: `${distInfo.label} · ${level} · Sem ${weekIndex + 1}/${macro.totalWeeks}`,
     phaseLabelFull: `${weekMeta.phaseName}${weekMeta.isDeload ? " · Descarga" : ""} · Semana ${weekIndex + 1}/${macro.totalWeeks} · ${level}`,
-    goalLine: s.goalName ? `${s.goalName} · ${distInfo.label}` : `Objetivo: ${distInfo.label}`,
+    goalLine: `${s.goalName ? s.goalName + " · " : "Objetivo: "}${distInfo.label}${s.goalDate ? " · " + formatDateShort(s.goalDate) : ""}`,
   };
+}
+
+// weekNext/coachWeekNext incrementaban el índice sin tope: al pasar la última semana del
+// plan, computeRenderModel seguía mostrando esa última semana (internamente sí clampea),
+// pero el índice crudo en el state seguía subiendo — eso desincronizaba el número de semana
+// mostrado ("Semana 25") de lo que realmente se veía, y peor: coachSetDay/coachSetEdge usan
+// ese índice crudo para guardar los overrides, así que una edición del coach podía guardarse
+// bajo una semana "fantasma" que nunca se vuelve a mostrar. Clampear en el origen (acá)
+// evita las dos cosas de una vez.
+function clampWeekIndex(profile, idx) {
+  const totalWeeks = computeRenderModel(profile, 0).macro.totalWeeks;
+  return Math.max(0, Math.min(totalWeeks - 1, idx));
 }
 
 // Meta larga a propósito: con el ritmo típico de entrenamientos + km de un plan, llegar a
@@ -3699,8 +3711,8 @@ const ACTIONS = {
   setTheme: (el) => setState({ theme: el.dataset.theme }),
   pickDay: (el) => setState({ selectedDayIdx: parseInt(el.dataset.idx, 10) }),
   weekPrev: () => setState((s) => ({ weekIndex: Math.max(0, s.weekIndex - 1), expandedKey: null, selectedDayIdx: null })),
-  weekNext: () => setState({ weekIndex: state.weekIndex + 1, expandedKey: null, selectedDayIdx: null }),
-  jumpWeek: (el) => setState({ weekIndex: parseInt(el.dataset.idx, 10), expandedKey: null }),
+  weekNext: () => setState((s) => ({ weekIndex: clampWeekIndex(state.profile, s.weekIndex + 1), expandedKey: null, selectedDayIdx: null })),
+  jumpWeek: (el) => setState({ weekIndex: clampWeekIndex(state.profile, parseInt(el.dataset.idx, 10)), expandedKey: null }),
   resetPlanProgress: () => {
     if (!confirm("¿Reiniciar el progreso del plan actual? Se borrarán los entrenamientos marcados como completados y las sincronizaciones de Strava, pero mantenés el mismo objetivo y nivel.")) return;
     setProfile({ completed: {}, dayOverrides: {}, stravaActivities: {} });
@@ -3831,8 +3843,16 @@ const ACTIONS = {
     render();
   },
   coachWeekPrev: () => setState((s) => ({ coachWeekIndex: Math.max(0, (s.coachWeekIndex || 0) - 1), coachExpandedKey: null })),
-  coachWeekNext: () => setState((s) => ({ coachWeekIndex: (s.coachWeekIndex || 0) + 1, coachExpandedKey: null })),
-  coachJumpWeek: (el) => setState({ coachWeekIndex: parseInt(el.dataset.idx, 10), coachExpandedKey: null }),
+  coachWeekNext: () => {
+    const acc = loadAccounts()[state.selectedAthleteEmail];
+    if (!acc) return;
+    setState((s) => ({ coachWeekIndex: clampWeekIndex(acc.profile, (s.coachWeekIndex || 0) + 1), coachExpandedKey: null }));
+  },
+  coachJumpWeek: (el) => {
+    const acc = loadAccounts()[state.selectedAthleteEmail];
+    if (!acc) return;
+    setState({ coachWeekIndex: clampWeekIndex(acc.profile, parseInt(el.dataset.idx, 10)), coachExpandedKey: null });
+  },
   coachToggleExpand: (el) => {
     const key = el.dataset.key;
     setState({ coachExpandedKey: state.coachExpandedKey === key ? null : key });
