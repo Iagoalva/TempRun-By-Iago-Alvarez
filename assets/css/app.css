@@ -1374,7 +1374,9 @@ button {
   gap: 10px;
 }
 .week-day-card {
-  background: var(--surface);
+  /* surface2 en vez de surface: contra el fondo de la app (--bg) quedaban casi del mismo
+     tono oscuro y costaba distinguir dónde empezaba cada día. */
+  background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
@@ -2275,9 +2277,19 @@ button {
     background: var(--surface);
     border-top: 1px solid var(--border);
     z-index: 50;
+    /* con 8 pestañas no entran cómodas repartidas a lo ancho — mejor una tira que se
+       desliza horizontalmente que ítems achicados y apretados. */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    justify-content: flex-start;
+  }
+  .mobile-tabbar::-webkit-scrollbar {
+    display: none;
   }
   .mobile-tabbar button {
-    flex: 1;
+    flex: none;
+    width: 74px;
     display: flex;
     flex-direction: column;
     align-items: center;

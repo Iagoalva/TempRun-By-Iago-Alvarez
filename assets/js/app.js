@@ -447,6 +447,8 @@ let state = {
   weatherStatus: "idle", // idle | loading | ready | denied | error | unsupported
   weatherCity: "",
   weatherTemp: null,
+  weatherCode: null,
+  weatherIsDay: 1,
   // herramientas calculators (local, not persisted)
   toolDistance: "5000",
   toolCustomKm: "",
@@ -647,6 +649,7 @@ function pulseTick() {
   render();
 }
 
+let lastScrollViewKey = null;
 function render() {
   document.documentElement.setAttribute("data-theme", state.theme);
 
@@ -655,12 +658,26 @@ function render() {
   const selStart = active && "selectionStart" in active ? active.selectionStart : null;
   const selEnd = active && "selectionEnd" in active ? active.selectionEnd : null;
 
+  // root.innerHTML = html destruye y recrea todo el DOM en cada render — sin esto, cualquier
+  // click (elegir un día del plan, tocar una opción del avatar, etc.) volvía a poner el
+  // panel scrolleado arriba de todo, porque el contenedor con el scroll era literalmente un
+  // elemento nuevo. Guardamos y restauramos su scrollTop, pero SOLO si seguimos mirando la
+  // misma pestaña/subpestaña — si el usuario navegó a otra vista, sí queremos arrancar
+  // arriba de todo, como es natural.
+  const viewKey = [state.screen, state.role, state.athleteTab, state.coachView, state.selectedAthleteEmail, state.perfilTab, state.coachDetailTab, state.coachPerfilTab, state.rutinasSubTab].join("|");
+  const scrollEl = root.querySelector(".app-content");
+  const scrollTop = scrollEl && viewKey === lastScrollViewKey ? scrollEl.scrollTop : 0;
+
   let html = "";
   if (state.screen === "login") html = renderAuth();
   else if (state.screen === "onboarding") html = renderOnboarding();
   else if (state.screen === "compiling") html = renderCompiling();
   else if (state.screen === "app") html = renderApp();
   root.innerHTML = html;
+
+  const nextScrollEl = root.querySelector(".app-content");
+  if (nextScrollEl) nextScrollEl.scrollTop = scrollTop;
+  lastScrollViewKey = viewKey;
 
   if (sel) {
     const next = root.querySelector(sel);
@@ -786,7 +803,7 @@ function renderOnboarding() {
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <div class="ob-field-icon">${ICONS.person}<input data-bind="profile.fullName" value="${esc(s.fullName)}" placeholder="Nombre completo"></div>
-        <div class="ob-field-icon">${ICONS.phone}<input data-bind="profile.phone" value="${esc(s.phone)}" placeholder="Teléfono"></div>
+        <div class="ob-field-icon">${ICONS.phone}<input type="tel" inputmode="tel" data-bind="profile.phone" value="${esc(s.phone)}" placeholder="Teléfono"></div>
         <div>
           <div class="ob-label">PROVINCIA</div>
           <select class="ob-select" data-bind="profile.provincia">
@@ -1280,16 +1297,34 @@ function renderApp() {
   </nav>`;
 }
 
+// Códigos WMO que devuelve Open-Meteo (current_weather.weathercode) — mapeados a un emoji
+// representativo para que el ícono del panel refleje el clima real, no siempre un sol fijo.
+function weatherEmoji(code, isDay) {
+  if (code == null) return "🌡️";
+  if (code === 0) return isDay ? "☀️" : "🌙";
+  if (code === 1 || code === 2) return isDay ? "⛅" : "☁️";
+  if (code === 3) return "☁️";
+  if (code === 45 || code === 48) return "🌫️";
+  if ([51, 53, 55, 56, 57].includes(code)) return "🌦️";
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return "🌧️";
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "🌨️";
+  if ([95, 96, 99].includes(code)) return "⛈️";
+  return "🌡️";
+}
+
 function renderWeatherWidget() {
-  const box = (content) => `<div style="background:var(--surface2);border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:9px;">${ICONS.weather}<div>${content}</div></div>`;
+  const box = (icon, content) => `<div style="background:var(--surface2);border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:9px;"><span style="font-size:20px;line-height:1;">${icon}</span><div>${content}</div></div>`;
   if (state.weatherStatus === "ready") {
-    return box(`
+    return box(
+      weatherEmoji(state.weatherCode, state.weatherIsDay),
+      `
       <div style="font-size:11px;color:var(--muted);font-weight:600;">${esc(state.weatherCity || "Tu ubicación")}</div>
       <div style="font-size:14px;font-weight:800;">${state.weatherTemp}°C</div>
-    `);
+    `
+    );
   }
   if (state.weatherStatus === "loading") {
-    return box(`<div style="font-size:11.5px;color:var(--muted);font-weight:600;">Ubicando...</div>`);
+    return box(ICONS.weather, `<div style="font-size:11.5px;color:var(--muted);font-weight:600;">Ubicando...</div>`);
   }
   // denied | error | unsupported | idle: no interrumpimos el panel, solo no mostramos clima
   return "";
@@ -1919,7 +1954,7 @@ function renderDailyRewardCard(profile) {
         claimedToday
           ? `<div style="font-size:12.5px;color:var(--muted);margin-top:8px;">${state.dailyRewardResult != null ? `¡Ganaste <b style="color:var(--accent);">+${state.dailyRewardResult} puntos</b> para tu pista! ` : "Ya abriste tu recompensa de hoy. "}Volvé mañana por otra.</div>`
           : `<div style="font-size:12px;color:var(--muted);margin:8px 0 14px;">Una vez por día podés abrir un premio sorpresa de puntos extra para avanzar en la pista.</div>
-             <button type="button" class="btn-accent" style="width:auto;padding:12px 24px;margin:0;" data-action="claimDailyReward">Abrir recompensa 🎁</button>`
+             <button type="button" class="btn-accent" style="width:auto;padding:12px 24px;margin:0 auto;" data-action="claimDailyReward">Abrir recompensa 🎁</button>`
       }
     </div>`;
 }
@@ -1964,10 +1999,14 @@ function renderSocialTrack(athletes, meEmail) {
   const cx = W / 2,
     cy = padTop + outerR;
 
+  // ojo: "--surface3" no existe como variable CSS en esta app (quedó de una versión de
+  // prueba) — con eso el trazado de la pista quedaba con un color inválido y no se dibujaba
+  // NADA, por eso no se entendía. Con var(--muted) + stroke-opacity queda visible en los
+  // dos temas sin competir con el color de acento.
   const laneOutlines = athletes
     .map((a, i) => {
       const r = Math.max(minR * 0.45, outerR - i * laneGap);
-      return `<path d="${stadiumPathD(cx, cy, Ls, r)}" fill="none" stroke="var(--surface3)" stroke-width="1.5"/>`;
+      return `<path d="${stadiumPathD(cx, cy, Ls, r)}" fill="none" stroke="var(--muted)" stroke-opacity="0.35" stroke-width="2"/>`;
     })
     .join("");
 
@@ -1978,7 +2017,7 @@ function renderSocialTrack(athletes, meEmail) {
   const tierTicks = GAMIFICATION_TIERS.map((tier) => {
     const t = Math.min(0.999, tier.min / meta);
     const p = stadiumPoint(cx, cy, Ls, outerR + 10, t);
-    return `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--surface3)"/><title>${esc(tier.name)} · ${tier.min} pts</title>`;
+    return `<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="var(--muted)"/><title>${esc(tier.name)} · ${tier.min} pts</title>`;
   }).join("");
 
   const runners = athletes
@@ -2001,8 +2040,8 @@ function renderSocialTrack(athletes, meEmail) {
     .join("");
 
   return `
-    <div style="overflow-x:auto;">
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" style="max-width:100%;height:auto;display:block;min-width:520px;">
+    <div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
         ${laneOutlines}
         ${finishLine}
         ${tierTicks}
@@ -2455,15 +2494,15 @@ function renderPerfilDatos(s) {
   ];
   return `
     <div class="ob-photo">
-      <input type="file" id="avatar-file-input" accept="image/*" style="display:none;" data-action="avatarFileSelected">
-      <div class="avatar-placeholder" data-action="avatarUploadClick" style="cursor:pointer;overflow:hidden;">
+      <input type="file" id="avatar-file-input" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;" data-action="avatarFileSelected">
+      <label for="avatar-file-input" class="avatar-placeholder" style="cursor:pointer;overflow:hidden;">
         ${
           s.avatarDataUrl
             ? `<img src="${s.avatarDataUrl}" alt="Foto de perfil" style="width:100%;height:100%;object-fit:cover;">`
             : `<svg viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="7" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="13.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`
         }
-      </div>
-      <div class="caption" data-action="avatarUploadClick" style="cursor:pointer;">${s.avatarDataUrl ? "CAMBIAR FOTO" : "FOTO DE PERFIL"}</div>
+      </label>
+      <label for="avatar-file-input" class="caption" style="cursor:pointer;">${s.avatarDataUrl ? "CAMBIAR FOTO" : "FOTO DE PERFIL"}</label>
       ${s.avatarDataUrl ? `<button type="button" data-action="avatarRemove" style="all:unset;cursor:pointer;font-size:10.5px;color:var(--muted);text-decoration:underline;margin-top:2px;">Quitar foto</button>` : ""}
     </div>
     ${
@@ -2482,7 +2521,7 @@ function renderPerfilDatos(s) {
     }
     <div class="perfil-fields">
       <div class="perfil-field">${ICONS.person}<input data-bind="profile.fullName" value="${esc(s.fullName)}"></div>
-      <div class="perfil-field">${ICONS.phone}<input data-bind="profile.phone" value="${esc(s.phone)}" placeholder="Teléfono"></div>
+      <div class="perfil-field">${ICONS.phone}<input type="tel" inputmode="tel" data-bind="profile.phone" value="${esc(s.phone)}" placeholder="Teléfono"></div>
       <div>
         <div class="ob-label">GÉNERO</div>
         <select class="ob-select" data-bind="profile.gender">
@@ -3621,10 +3660,6 @@ const ACTIONS = {
     if (el) el.click();
   },
   fitnessCertRemove: () => setProfile({ fitnessCertFileName: "", fitnessCertDataUrl: "", fitnessCertUploadedAt: "" }),
-  avatarUploadClick: () => {
-    const el = document.getElementById("avatar-file-input");
-    if (el) el.click();
-  },
   avatarRemove: () => setProfile({ avatarDataUrl: "" }),
   avatarConfirmPreview: () => {
     if (!state.avatarPreviewDataUrl) return;
@@ -3954,9 +3989,11 @@ function initWeather() {
         const weatherData = await weatherRes.json();
         const placeData = await placeRes.json();
         const temp = weatherData?.current_weather?.temperature;
+        const code = weatherData?.current_weather?.weathercode;
+        const isDay = weatherData?.current_weather?.is_day;
         const city = placeData?.city || placeData?.locality || placeData?.principalSubdivision || "";
         if (temp == null) throw new Error("sin datos de clima");
-        setState({ weatherStatus: "ready", weatherTemp: Math.round(temp), weatherCity: city });
+        setState({ weatherStatus: "ready", weatherTemp: Math.round(temp), weatherCity: city, weatherCode: code, weatherIsDay: isDay });
       } catch (e) {
         setState({ weatherStatus: "error" });
       }
