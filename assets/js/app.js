@@ -235,6 +235,73 @@ async function clearLeaderboardSelf() {
     console.warn("Supabase: error de red al limpiar el ranking social", e);
   }
 }
+
+/* ---------------- GOOGLE SHEETS (contactos + resumen semanal) ----------------
+   Se publica a una planilla de Google Sheets vía un Google Apps Script propio, desplegado
+   como "Web App" (ver google-apps-script-weekly-summary.js). No usamos las credenciales de
+   Google directamente en el navegador — el script de Apps Script corre del lado de Google
+   con los permisos del dueño de la planilla, y acá solo le mandamos un POST con un secreto
+   compartido (GOOGLE_SHEETS_SHARED_SECRET) para que no cualquiera pueda escribirle.
+   Completar estos dos valores recién después de desplegar el Apps Script — hasta entonces
+   la función no hace nada (no rompe nada si queda vacío). */
+const GOOGLE_SHEETS_WEBAPP_URL = "";
+const GOOGLE_SHEETS_SHARED_SECRET = "";
+
+async function pushWeeklyContactSummary() {
+  if (!GOOGLE_SHEETS_WEBAPP_URL || state.role !== "athlete" || !state.profile || !state.currentEmail) return;
+  if (!state.profile.onboardingDone || state.profile.removedByCoach) return;
+  const stats = computeWeeklyStats(state.profile);
+  try {
+    // Content-Type "text/plain" a propósito: evita que el navegador mande un preflight
+    // CORS (OPTIONS) antes del POST, que Apps Script no maneja bien. El script igual lee
+    // el body como JSON del lado de adentro.
+    await fetch(GOOGLE_SHEETS_WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        secret: GOOGLE_SHEETS_SHARED_SECRET,
+        email: state.currentEmail,
+        fullName: state.profile.fullName || "",
+        phone: state.profile.phone || "",
+        provincia: state.profile.provincia || "",
+        zona: state.profile.zona || "",
+        weeklyKm: stats.weeklyKm,
+        sessionsDone: stats.sessionsDone,
+        adherence: stats.adherence,
+      }),
+    });
+  } catch (e) {
+    console.warn("No se pudo sincronizar con Google Sheets", e);
+  }
+}
+
+const ARG_PROVINCIAS = [
+  "Buenos Aires",
+  "CABA",
+  "Catamarca",
+  "Chaco",
+  "Chubut",
+  "Córdoba",
+  "Corrientes",
+  "Entre Ríos",
+  "Formosa",
+  "Jujuy",
+  "La Pampa",
+  "La Rioja",
+  "Mendoza",
+  "Misiones",
+  "Neuquén",
+  "Río Negro",
+  "Salta",
+  "San Juan",
+  "San Luis",
+  "Santa Cruz",
+  "Santa Fe",
+  "Santiago del Estero",
+  "Tierra del Fuego",
+  "Tucumán",
+];
+
 const GROUP_LABELS = { "3k": "3K", "5k": "5K", "10k": "10K" };
 const GROUP_ORDER = ["3k", "5k", "10k"];
 const PLAN_TYPE_OPTIONS = [
@@ -271,6 +338,8 @@ function defaultProfileState() {
   return {
     fullName: "",
     phone: "",
+    provincia: "",
+    zona: "",
     gender: "Masculino",
     birthdate: "",
     weight: "",
@@ -719,6 +788,14 @@ function renderOnboarding() {
         <div class="ob-field-icon">${ICONS.person}<input data-bind="profile.fullName" value="${esc(s.fullName)}" placeholder="Nombre completo"></div>
         <div class="ob-field-icon">${ICONS.phone}<input data-bind="profile.phone" value="${esc(s.phone)}" placeholder="Teléfono"></div>
         <div>
+          <div class="ob-label">PROVINCIA</div>
+          <select class="ob-select" data-bind="profile.provincia">
+            <option value="">Elegí tu provincia</option>
+            ${ARG_PROVINCIAS.map((p) => `<option value="${p}" ${s.provincia === p ? "selected" : ""}>${p}</option>`).join("")}
+          </select>
+        </div>
+        <div class="ob-field-icon">${ICONS.pin}<input data-bind="profile.zona" value="${esc(s.zona)}" placeholder="Zona / barrio (ej: Palermo, Zona Norte)"></div>
+        <div>
           <div class="ob-label">GÉNERO</div>
           <select class="ob-select" data-bind="profile.gender">
             ${["Masculino", "Femenino", "Otro"].map((g) => `<option value="${g}" ${s.gender === g ? "selected" : ""}>${g}</option>`).join("")}
@@ -1081,6 +1158,18 @@ function computeWeeklyKm(profile) {
   const idx = currentWeekIndexFromDate(profile, totalWeeks);
   const m = idx === 0 ? m0 : computeRenderModel(profile, idx);
   return Math.round(m.doneKm * 10) / 10;
+}
+
+// Para el resumen semanal que se manda a Google Sheets (ver pushWeeklyContactSummary):
+// mismo cálculo de "esta semana" que computeWeeklyKm, pero además cuenta las sesiones
+// completadas y el % de adherencia de esa semana puntual.
+function computeWeeklyStats(profile) {
+  const m0 = computeRenderModel(profile, 0);
+  const totalWeeks = m0.macro.totalWeeks;
+  const idx = currentWeekIndexFromDate(profile, totalWeeks);
+  const m = idx === 0 ? m0 : computeRenderModel(profile, idx);
+  const sessionsDone = m.planDays.filter((d) => d.hasSession && d.done).length;
+  return { weeklyKm: Math.round(m.doneKm * 10) / 10, sessionsDone, adherence: m.pct };
 }
 
 // La recompensa diaria nunca resta puntos — solo varía cuánto suma (como el cofre de
@@ -2400,6 +2489,14 @@ function renderPerfilDatos(s) {
           ${["Masculino", "Femenino", "Otro"].map((g) => `<option value="${g}" ${s.gender === g ? "selected" : ""}>${g}</option>`).join("")}
         </select>
       </div>
+      <div>
+        <div class="ob-label">PROVINCIA</div>
+        <select class="ob-select" data-bind="profile.provincia">
+          <option value="">Elegí tu provincia</option>
+          ${ARG_PROVINCIAS.map((p) => `<option value="${p}" ${s.provincia === p ? "selected" : ""}>${p}</option>`).join("")}
+        </select>
+      </div>
+      <div class="perfil-field">${ICONS.pin}<input data-bind="profile.zona" value="${esc(s.zona)}" placeholder="Zona / barrio"></div>
     </div>
 
     <div class="perfil-grid">
@@ -3925,4 +4022,5 @@ setProfile = function (patch) {
   pullLeaderboard();
   setInterval(pullLeaderboard, SUPABASE_SYNC_INTERVAL_MS);
   setInterval(pushLeaderboardSelf, SUPABASE_SYNC_INTERVAL_MS);
+  setInterval(pushWeeklyContactSummary, SUPABASE_SYNC_INTERVAL_MS);
 })();
