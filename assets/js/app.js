@@ -364,6 +364,7 @@ function defaultProfileState() {
     stravaActivities: {}, // { [weekIndex-dayIndex]: { km, durationMin, pace, syncedAt } }
     chatMessages: [],
     coachReadCount: 0,
+    athleteReadCount: 0,
     onboardingDone: false,
     raceLog: [], // [{ id, distKey: "p3k"|"p5k"|"p10k", date: "YYYY-MM-DD", timeSec }]
     // membresía: placeholder manual (transferencia + comprobante) hasta que se integre
@@ -1256,10 +1257,11 @@ function renderApp() {
   const firstName = (s.fullName || "Atleta").split(" ")[0];
   const avatarLetter = firstName.charAt(0).toUpperCase();
 
+  const unreadFromCoach = unreadFromCoachCount(s);
   const navItems = [
     { key: "panel", icon: ICONS.panel, label: "Panel" },
     { key: "plan", icon: ICONS.plan, label: "Plan" },
-    { key: "chat", icon: ICONS.chatNav, label: "Chat" },
+    { key: "chat", icon: ICONS.chatNav, label: "Chat", unread: unreadFromCoach },
     { key: "tools", icon: ICONS.tools, label: "Herramientas" },
     { key: "rutinas", icon: ICONS.rutinas, label: "Rutinas" },
     { key: "progreso", icon: ICONS.medal, label: "Progreso" },
@@ -1278,7 +1280,14 @@ function renderApp() {
         </div>
       </div>
       <nav class="sidebar-nav">
-        ${navItems.map((n) => `<button class="${state.athleteTab === n.key ? "active" : ""}" data-action="goTab" data-tab="${n.key}">${n.icon}<span class="nav-label">${n.label}</span></button>`).join("")}
+        ${navItems
+          .map(
+            (n) =>
+              `<button class="${state.athleteTab === n.key ? "active" : ""}" data-action="goTab" data-tab="${n.key}">${n.icon}<span class="nav-label">${n.label}</span>${
+                n.unread > 0 ? `<span class="athlete-unread-badge" style="margin-left:auto;" title="${n.unread} mensaje${n.unread > 1 ? "s" : ""} sin leer">${n.unread}</span>` : ""
+              }</button>`
+          )
+          .join("")}
       </nav>
       <div class="sidebar-footer">
         <div class="footer-label">TEMA</div>
@@ -1305,7 +1314,14 @@ function renderApp() {
   </div>
 
   <nav class="mobile-tabbar">
-    ${navItems.map((n) => `<button class="${state.athleteTab === n.key ? "active" : ""}" data-action="goTab" data-tab="${n.key}">${n.icon}<span>${n.label}</span></button>`).join("")}
+    ${navItems
+      .map(
+        (n) =>
+          `<button class="${state.athleteTab === n.key ? "active" : ""}" data-action="goTab" data-tab="${n.key}">${n.icon}<span>${n.label}</span>${
+            n.unread > 0 ? `<span class="athlete-unread-badge" style="position:absolute;top:2px;right:14px;">${n.unread}</span>` : ""
+          }</button>`
+      )
+      .join("")}
   </nav>`;
 }
 
@@ -2732,6 +2748,13 @@ function unreadCountFor(profile) {
   return profile.chatMessages.slice(readCount).filter((m) => m.from === "athlete").length;
 }
 
+// Mismo mecanismo que unreadCountFor pero del lado del atleta — antes no existía ningún
+// aviso cuando el coach le escribía, tenía que entrar a Chat "porque sí" para enterarse.
+function unreadFromCoachCount(profile) {
+  const readCount = profile.athleteReadCount || 0;
+  return profile.chatMessages.slice(readCount).filter((m) => m.from === "coach").length;
+}
+
 // Usado tanto por el coach como por el atleta en la pantalla Social: lee de la tabla
 // pública "leaderboard" (todos los atletas, sin restricción de RLS), no de "profiles". La
 // propia fila se reemplaza por el valor calculado en vivo del perfil local, para no
@@ -3705,6 +3728,9 @@ const ACTIONS = {
       pullLeaderboard();
       pushLeaderboardSelf();
     }
+    if (el.dataset.tab === "chat") {
+      setProfile((p) => ({ athleteReadCount: p.chatMessages.length }));
+    }
   },
   setPerfilTab: (el) => setState({ perfilTab: el.dataset.tab }),
   setActivityLevel: (el) => setProfile({ activityLevel: el.dataset.val }),
@@ -3782,7 +3808,10 @@ const ACTIONS = {
     if (!state.chatInput.trim()) return;
     const now = new Date();
     const time = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
-    setProfile((p) => ({ chatMessages: [...p.chatMessages, { from: "athlete", text: state.chatInput, time }] }));
+    setProfile((p) => {
+      const chatMessages = [...p.chatMessages, { from: "athlete", text: state.chatInput, time }];
+      return { chatMessages, athleteReadCount: chatMessages.length };
+    });
     setState({ chatInput: "" });
   },
   openAthlete: (el) => {
