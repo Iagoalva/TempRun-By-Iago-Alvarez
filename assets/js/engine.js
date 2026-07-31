@@ -680,7 +680,11 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo, level) {
     const c = resolveEdgeMin(cooldownMinOverride, 8, cap);
     const warmupKm = w.km,
       cooldownKm = c.km;
-    const mainKm = Math.max(km - warmupKm - cooldownKm, 1);
+    // entrada+vuelta ya están topeadas cada una a km/3 (más arriba), así que lo que queda acá
+    // es matemáticamente siempre >= km/3 — un piso fijo de 1km rompía esa garantía en
+    // sesiones cortas (habituales para principiantes) y terminaba mostrando una principal
+    // más chica que la suma de entrada+vuelta, o un total que no coincidía con el km cargado.
+    const mainKm = Math.max(km - warmupKm - cooldownKm, 0.1);
     const totalKm = Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10;
     typeTag = isSoft ? "FARTLEK SUAVE" : "FARTLEK";
     title = isSoft ? `FARTLEK SUAVE · ADAPTACIÓN (${totalKm} KM)` : `FARTLEK (${totalKm} KM)`;
@@ -704,7 +708,11 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo, level) {
     const c = resolveEdgeMin(cooldownMinOverride, 10, cap);
     const warmupKm = w.km,
       cooldownKm = c.km;
-    const mainKm = Math.max(km - warmupKm - cooldownKm, 1);
+    // entrada+vuelta ya están topeadas cada una a km/3 (más arriba), así que lo que queda acá
+    // es matemáticamente siempre >= km/3 — un piso fijo de 1km rompía esa garantía en
+    // sesiones cortas (habituales para principiantes) y terminaba mostrando una principal
+    // más chica que la suma de entrada+vuelta, o un total que no coincidía con el km cargado.
+    const mainKm = Math.max(km - warmupKm - cooldownKm, 0.1);
     const totalKm = Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10;
     typeTag = "FONDO";
     title = `${isSpecific ? "FONDO CON RITMO OBJETIVO" : "FONDO LARGO"} (${totalKm} KM)`;
@@ -730,7 +738,11 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo, level) {
     const c = resolveEdgeMin(cooldownMinOverride, 8, cap);
     const warmupKm = w.km,
       cooldownKm = c.km;
-    const mainKm = Math.max(km - warmupKm - cooldownKm, 1);
+    // entrada+vuelta ya están topeadas cada una a km/3 (más arriba), así que lo que queda acá
+    // es matemáticamente siempre >= km/3 — un piso fijo de 1km rompía esa garantía en
+    // sesiones cortas (habituales para principiantes) y terminaba mostrando una principal
+    // más chica que la suma de entrada+vuelta, o un total que no coincidía con el km cargado.
+    const mainKm = Math.max(km - warmupKm - cooldownKm, 0.1);
     const totalKm = Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10;
     typeTag = "RITMO";
     title = `RITMO DE CARRERA (${totalKm} KM)`;
@@ -748,7 +760,11 @@ function sessionBlocks(d, fcRest, fcMax, paces, distInfo, level) {
     const c = resolveEdgeMin(cooldownMinOverride, 5, cap);
     const warmupKm = w.km,
       cooldownKm = c.km;
-    const mainKm = Math.max(km - warmupKm - cooldownKm, 1);
+    // entrada+vuelta ya están topeadas cada una a km/3 (más arriba), así que lo que queda acá
+    // es matemáticamente siempre >= km/3 — un piso fijo de 1km rompía esa garantía en
+    // sesiones cortas (habituales para principiantes) y terminaba mostrando una principal
+    // más chica que la suma de entrada+vuelta, o un total que no coincidía con el km cargado.
+    const mainKm = Math.max(km - warmupKm - cooldownKm, 0.1);
     const totalKm = Math.round((warmupKm + mainKm + cooldownKm) * 10) / 10;
     typeTag = "RODAJE";
     title = `RODAJE SUAVE (${totalKm} KM)`;
