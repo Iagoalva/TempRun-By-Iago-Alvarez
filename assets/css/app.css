@@ -1023,6 +1023,12 @@ button {
   font-weight: 800;
   font-size: 18px;
   flex: none;
+  overflow: hidden;
+}
+.avatar-circle img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .eyebrow-brand {
   font-size: 11.5px;

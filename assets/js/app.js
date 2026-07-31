@@ -35,6 +35,7 @@ const ICONS = {
   pulseWave: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M2 12h4l2-7 4 14 2-9 2 5h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   calculator: `<svg viewBox="0 0 24 24" width="16" height="16"><rect x="4" y="2" width="16" height="20" rx="2" fill="none" stroke="var(--accent)" stroke-width="1.6"/><line x1="7" y1="6" x2="17" y2="6" stroke="var(--accent)" stroke-width="1.6"/><circle cx="7.5" cy="12" r="1" fill="var(--accent)"/><circle cx="12" cy="12" r="1" fill="var(--accent)"/><circle cx="16.5" cy="12" r="1" fill="var(--accent)"/><circle cx="7.5" cy="16.5" r="1" fill="var(--accent)"/><circle cx="12" cy="16.5" r="1" fill="var(--accent)"/><circle cx="16.5" cy="16.5" r="1" fill="var(--accent)"/></svg>`,
   rutinas: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="4" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 6.5v6l-4 7M12 12.5l4 7M8 10l4-2 4 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  medal: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="14" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 3 12 9 15 3M9 3l1.4 5.2M15 3l-1.4 5.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 14.5 11.3 16 14.3 12.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 function sessionIcon(typeTag) {
   return typeTag === "CUESTAS" ? ICONS.mountain : ICONS.lightning;
@@ -215,6 +216,9 @@ function defaultProfileState() {
     fitnessCertFileName: "",
     fitnessCertDataUrl: "",
     fitnessCertUploadedAt: "",
+    // foto de perfil: selfie o imagen de la galería, guardada como data URL (mismo enfoque
+    // que el apto físico) para no depender de un backend de almacenamiento de archivos.
+    avatarDataUrl: "",
     // el coach lo puede sacar de su lista de atletas sin borrar la cuenta (eso requiere
     // privilegios de administrador en Supabase) — queda reversible desde "Dados de baja".
     removedByCoach: false,
@@ -895,6 +899,53 @@ function computeRenderModel(profile, weekIndexParam) {
   };
 }
 
+const GAMIFICATION_TIERS = [
+  { min: 0, name: "Semilla", emoji: "🌱" },
+  { min: 50, name: "Brote", emoji: "🌿" },
+  { min: 150, name: "Corredor", emoji: "🏃" },
+  { min: 350, name: "Atleta", emoji: "🏅" },
+  { min: 700, name: "Leyenda", emoji: "🏆" },
+];
+
+// Todo se calcula al vuelo a partir de profile.completed / raceLog / el plan — no se guarda
+// ningún puntaje aparte, así nunca se puede desincronizar de lo que el atleta hizo de verdad.
+function computeGamification(profile, currentWeekHint) {
+  const totalCompleted = Object.values(profile.completed || {}).filter(Boolean).length;
+  const m0 = computeRenderModel(profile, 0);
+  const totalWeeks = m0.macro.totalWeeks;
+  let totalKmCompleted = 0;
+  for (let i = 0; i < totalWeeks; i++) {
+    totalKmCompleted += (i === 0 ? m0 : computeRenderModel(profile, i)).doneKm;
+  }
+  const currentWeek = Math.min(totalWeeks - 1, Math.max(0, currentWeekHint || 0));
+  let streakWeeks = 0;
+  for (let i = currentWeek; i >= 0; i--) {
+    const mi = computeRenderModel(profile, i);
+    if (mi.totalKm > 0 && mi.pct === 100) streakWeeks++;
+    else break;
+  }
+  const points = totalCompleted * 10 + Math.round(totalKmCompleted) * 5;
+  let tierIdx = 0;
+  for (let i = 0; i < GAMIFICATION_TIERS.length; i++) if (points >= GAMIFICATION_TIERS[i].min) tierIdx = i;
+  const tier = GAMIFICATION_TIERS[tierIdx];
+  const nextTier = GAMIFICATION_TIERS[tierIdx + 1] || null;
+  const progressToNext = nextTier ? Math.round(((points - tier.min) / (nextTier.min - tier.min)) * 100) : 100;
+  const badges = [
+    { key: "first", label: "Primer entrenamiento", emoji: "🥇", done: totalCompleted >= 1 },
+    { key: "ten", label: "10 entrenamientos", emoji: "🔟", done: totalCompleted >= 10 },
+    { key: "fifty_sessions", label: "50 entrenamientos", emoji: "💯", done: totalCompleted >= 50 },
+    { key: "km50", label: "50km acumulados", emoji: "🏁", done: totalKmCompleted >= 50 },
+    { key: "km100", label: "100km acumulados", emoji: "🚀", done: totalKmCompleted >= 100 },
+    { key: "race", label: "Primera carrera registrada", emoji: "🎽", done: (profile.raceLog || []).length >= 1 },
+    { key: "streak4", label: "Racha de 4 semanas perfectas", emoji: "🔥", done: streakWeeks >= 4 },
+  ];
+  return { totalCompleted, totalKmCompleted: Math.round(totalKmCompleted * 10) / 10, points, tier, tierIdx, nextTier, progressToNext, streakWeeks, badges };
+}
+
+function renderAvatarInner(profile, letter) {
+  return profile.avatarDataUrl ? `<img src="${profile.avatarDataUrl}" alt="Foto de perfil">` : letter;
+}
+
 function renderApp() {
   if (state.role === "coach") return renderCoachApp();
   const m = computeRenderModel();
@@ -908,6 +959,7 @@ function renderApp() {
     { key: "chat", icon: ICONS.chatNav, label: "Chat" },
     { key: "tools", icon: ICONS.tools, label: "Herramientas" },
     { key: "rutinas", icon: ICONS.rutinas, label: "Rutinas" },
+    { key: "progreso", icon: ICONS.medal, label: "Progreso" },
     { key: "perfil", icon: ICONS.perfil, label: "Perfil" },
   ];
 
@@ -941,6 +993,7 @@ function renderApp() {
         ${state.athleteTab === "chat" ? renderChatTab() : ""}
         ${state.athleteTab === "tools" ? renderToolsTab() : ""}
         ${state.athleteTab === "rutinas" ? renderRutinasTab() : ""}
+        ${state.athleteTab === "progreso" ? renderProgresoTab(state.profile, state.weekIndex) : ""}
         ${state.athleteTab === "perfil" ? renderPerfil() : ""}
       </div>
     </main>
@@ -976,7 +1029,7 @@ function renderPanel(m, firstName, avatarLetter) {
   return `
     <div class="panel-header">
       <div class="panel-header-left">
-        <div class="avatar-circle">${avatarLetter}</div>
+        <div class="avatar-circle">${renderAvatarInner(state.profile, avatarLetter)}</div>
         <div>
           <div class="eyebrow-brand">TEMPRUN · IAGO ALVAREZ</div>
           <div class="hello-title">Hola, <span>${esc(firstName)}</span></div>
@@ -1464,6 +1517,54 @@ function renderElongacionInfo(side, selectedZoneKey) {
     </div>`;
 }
 
+function renderProgresoTab(profile, currentWeekHint) {
+  const g = computeGamification(profile, currentWeekHint);
+  return `
+    <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Progreso</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:22px;">Tu avatar sube de nivel a medida que sumás entrenamientos y kilómetros.</div>
+
+    <div class="perfil-panel" style="max-width:640px;margin-bottom:22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+      <div style="font-size:64px;line-height:1;width:88px;height:88px;border-radius:50%;background:var(--surface2);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;flex:none;">${g.tier.emoji}</div>
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:19px;font-weight:800;">${g.tier.name}</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${g.points} puntos${g.nextTier ? ` · faltan ${g.nextTier.min - g.points} para ${g.nextTier.name} ${g.nextTier.emoji}` : " · nivel máximo alcanzado"}</div>
+        <div style="height:8px;border-radius:4px;background:var(--surface2);margin-top:10px;overflow:hidden;">
+          <div style="height:100%;border-radius:4px;background:var(--accent);width:${g.progressToNext}%;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:26px;max-width:640px;">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
+        <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">ENTRENAMIENTOS</div>
+        <div style="font-size:22px;font-weight:800;margin-top:8px;">${g.totalCompleted}</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
+        <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">KM ACUMULADOS</div>
+        <div style="font-size:22px;font-weight:800;margin-top:8px;">${g.totalKmCompleted}</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
+        <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">RACHA</div>
+        <div style="font-size:22px;font-weight:800;margin-top:8px;display:flex;align-items:center;gap:6px;">${g.streakWeeks > 0 ? ICONS.flame : ""} ${g.streakWeeks} sem</div>
+      </div>
+    </div>
+
+    <div class="perfil-panel" style="max-width:640px;">
+      <div class="perfil-panel-heading">${ICONS.trophy} LOGROS</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-top:12px;">
+        ${g.badges
+          .map(
+            (b) => `
+          <div style="background:${b.done ? "var(--surface2)" : "transparent"};border:1px dashed ${b.done ? "var(--accent)" : "var(--border)"};border-radius:10px;padding:14px 10px;text-align:center;opacity:${b.done ? "1" : "0.45"};">
+            <div style="font-size:26px;">${b.emoji}</div>
+            <div style="font-size:11px;font-weight:700;margin-top:6px;">${esc(b.label)}</div>
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>`;
+}
+
 function renderRutinasTab() {
   const sub = state.rutinasSubTab;
   return `
@@ -1857,10 +1958,16 @@ function renderPerfilDatos(s) {
   ];
   return `
     <div class="ob-photo">
-      <div class="avatar-placeholder">
-        <svg viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="7" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="13.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      <input type="file" id="avatar-file-input" accept="image/*" style="display:none;" data-action="avatarFileSelected">
+      <div class="avatar-placeholder" data-action="avatarUploadClick" style="cursor:pointer;overflow:hidden;">
+        ${
+          s.avatarDataUrl
+            ? `<img src="${s.avatarDataUrl}" alt="Foto de perfil" style="width:100%;height:100%;object-fit:cover;">`
+            : `<svg viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="7" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="13.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`
+        }
       </div>
-      <div class="caption">FOTO DE PERFIL</div>
+      <div class="caption" data-action="avatarUploadClick" style="cursor:pointer;">${s.avatarDataUrl ? "CAMBIAR FOTO" : "FOTO DE PERFIL"}</div>
+      ${s.avatarDataUrl ? `<button type="button" data-action="avatarRemove" style="all:unset;cursor:pointer;font-size:10.5px;color:var(--muted);text-decoration:underline;margin-top:2px;">Quitar foto</button>` : ""}
     </div>
     <div class="perfil-fields">
       <div class="perfil-field">${ICONS.person}<input data-bind="profile.fullName" value="${esc(s.fullName)}"></div>
@@ -2059,6 +2166,7 @@ function getAthleteSummaries() {
   return getAllAthleteAccounts().map(({ email, acc }) => {
     const m = computeRenderModel(acc.profile, 0);
     const isBad = m.acwrStatus.color === "var(--bad)" && !m.weekMeta.isDeload;
+    const g = computeGamification(acc.profile, 0);
     return {
       email,
       name: acc.profile.fullName || email,
@@ -2071,6 +2179,8 @@ function getAthleteSummaries() {
       alert: isBad,
       unread: unreadCountFor(acc.profile),
       sync: acc.profile.stravaStatus === "connected" ? "Strava" : "—",
+      points: g.points,
+      tierEmoji: g.tier.emoji,
     };
   });
 }
@@ -2187,7 +2297,7 @@ function renderCoachRoster(athletes) {
              <div style="font-size:13.5px;color:var(--muted);">Cuando un alumno se registre y termine el onboarding, va a aparecer acá.</div>
            </div>`
         : `
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:26px;">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px;">
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
             <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">ATLETAS ACTIVOS</div>
             <div style="font-size:22px;font-weight:800;margin-top:8px;">${athletes.length}</div>
@@ -2202,6 +2312,8 @@ function renderCoachRoster(athletes) {
           </div>
         </div>
 
+        ${renderTopAthletes(athletes)}
+
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
           <div style="display:flex;gap:10px;padding:12px 18px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.3px;">
             <div style="flex:2;">ATLETA</div>
@@ -2209,6 +2321,7 @@ function renderCoachRoster(athletes) {
             <div style="flex:1;">NIVEL</div>
             <div style="flex:1;">ADHERENCIA</div>
             <div style="flex:1.4;">CARGA</div>
+            <div style="flex:1;">PUNTOS</div>
           </div>
           ${athletes
             .map(
@@ -2219,12 +2332,37 @@ function renderCoachRoster(athletes) {
               <div style="flex:1;color:var(--muted);">${a.level}</div>
               <div style="flex:1;font-weight:700;">${a.adherence}%</div>
               <div style="flex:1.4;"><span style="font-size:11.5px;font-weight:700;color:${a.loadColor};background:color-mix(in oklch, ${a.loadColor} 18%, transparent);padding:4px 10px;border-radius:12px;">${a.loadLabel}</span></div>
+              <div style="flex:1;font-weight:700;">${a.tierEmoji} ${a.points}</div>
             </div>`
             )
             .join("")}
         </div>`
     }
     ${renderRemovedAthletes()}`;
+}
+
+function renderTopAthletes(athletes) {
+  const top = [...athletes].sort((a, b) => b.points - a.points).slice(0, 3);
+  if (top.length === 0 || top[0].points === 0) return "";
+  const medals = ["🥇", "🥈", "🥉"];
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:20px;">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:0.3px;margin-bottom:12px;">${ICONS.trophy} RANKING · TOP ATLETAS</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;">
+        ${top
+          .map(
+            (a, i) => `
+          <div data-action="openAthlete" data-email="${esc(a.email)}" style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:10px;padding:10px 16px;cursor:pointer;flex:1;min-width:160px;">
+            <span style="font-size:20px;">${medals[i]}</span>
+            <div>
+              <div style="font-size:12.5px;font-weight:700;">${esc(a.name)}</div>
+              <div style="font-size:11px;color:var(--muted);">${a.tierEmoji} ${a.points} pts</div>
+            </div>
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>`;
 }
 
 function renderRemovedAthletes() {
@@ -2263,6 +2401,8 @@ function makeReadOnly(html) {
     .replace(/\sdata-bind="[^"]*"/g, "");
 }
 
+const COACH_PERFIL_TABS = [...PERFIL_TABS, { key: "progreso", label: "PROGRESO" }];
+
 function renderCoachPerfil(profile) {
   const tab = state.coachPerfilTab || "datos";
   const bodies = {
@@ -2271,10 +2411,11 @@ function renderCoachPerfil(profile) {
     fisiologia: renderPerfilFisiologia(profile),
     salud: renderPerfilSalud(profile),
     membresia: renderPerfilMembresia(profile),
+    progreso: renderProgresoTab(profile, state.coachWeekIndex),
   };
   return `
     <div class="perfil-tabs" style="margin-bottom:18px;">
-      ${PERFIL_TABS.map((t) => `<button class="perfil-tab-btn ${tab === t.key ? "active" : ""}" data-action="setCoachPerfilTab" data-tab="${t.key}">${t.label}</button>`).join("")}
+      ${COACH_PERFIL_TABS.map((t) => `<button class="perfil-tab-btn ${tab === t.key ? "active" : ""}" data-action="setCoachPerfilTab" data-tab="${t.key}">${t.label}</button>`).join("")}
     </div>
     <div style="font-size:11.5px;color:var(--muted);margin-bottom:16px;">Vista de solo lectura — esta es la información que cargó el atleta.</div>
     ${makeReadOnly(bodies[tab] || bodies.datos)}`;
@@ -2296,6 +2437,7 @@ function renderCoachDetail() {
   return `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;flex-wrap:wrap;">
       <button data-action="backToRoster" style="all:unset;cursor:pointer;width:34px;height:34px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;line-height:32px;">‹</button>
+      <div class="avatar-circle">${renderAvatarInner(profile, esc((profile.fullName || "?").charAt(0).toUpperCase()))}</div>
       <div style="flex:1;min-width:200px;">
         <div style="font-size:24px;font-weight:800;">${esc(profile.fullName || state.selectedAthleteEmail)}</div>
         <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${m.distInfo.label} · ${m.level} · ${m.pct}% adherencia esta semana · ${m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label}</div>
@@ -2482,6 +2624,18 @@ function bindDynamicListeners() {
       const reader = new FileReader();
       reader.onload = () => {
         setProfile({ fitnessCertFileName: file.name, fitnessCertDataUrl: reader.result, fitnessCertUploadedAt: new Date().toISOString().slice(0, 10) });
+      };
+      reader.readAsDataURL(file);
+      el.value = "";
+    });
+  });
+  root.querySelectorAll('[data-action="avatarFileSelected"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      const file = el.files && el.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setProfile({ avatarDataUrl: reader.result });
       };
       reader.readAsDataURL(file);
       el.value = "";
@@ -2893,6 +3047,11 @@ const ACTIONS = {
     if (el) el.click();
   },
   fitnessCertRemove: () => setProfile({ fitnessCertFileName: "", fitnessCertDataUrl: "", fitnessCertUploadedAt: "" }),
+  avatarUploadClick: () => {
+    const el = document.getElementById("avatar-file-input");
+    if (el) el.click();
+  },
+  avatarRemove: () => setProfile({ avatarDataUrl: "" }),
   setRutinasSubTab: (el) => setState({ rutinasSubTab: el.dataset.tab }),
   setTecnicaSubTab: (el) => setState({ tecnicaSubTab: el.dataset.tab }),
   toggleElongacionSide: () => setState((s) => ({ elongacionSide: s.elongacionSide === "frente" ? "espalda" : "frente", elongacionZone: null })),
