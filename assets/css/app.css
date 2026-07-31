@@ -2194,6 +2194,15 @@ button {
 @media (max-width: 900px) {
   .app-shell {
     flex-direction: column;
+    /* dvh sigue el alto real de la ventana visible en el navegador del celular (evita que
+       la barra de direcciones tape contenido); height fijo (no min-height) es lo que deja
+       que .app-content scrollee DENTRO de la pantalla en vez de que la página entera se
+       haga larga y scrollee de punta a punta. */
+    height: 100vh;
+    height: 100dvh;
+  }
+  .app-content {
+    min-height: 0;
   }
   .app-sidebar {
     width: 100%;
@@ -2202,6 +2211,7 @@ button {
     flex-wrap: wrap;
     padding: 14px 16px;
     gap: 12px;
+    flex: none;
   }
   .sidebar-nav {
     flex-direction: row;

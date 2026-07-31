@@ -2319,6 +2319,11 @@ function renderPerfil() {
     ${bodies[tab] || bodies.datos}
     <div style="margin-top:32px;max-width:420px;">
       <button class="logout-btn-lg" style="padding:16px 0;font-size:15.5px;" data-action="logout">Cerrar sesión</button>
+    </div>
+    <div style="margin-top:28px;max-width:420px;padding-top:20px;border-top:1px dashed var(--border);">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.4px;margin-bottom:10px;">ZONA DE PELIGRO</div>
+      <button type="button" style="all:unset;cursor:pointer;width:100%;text-align:center;padding:14px 0;border-radius:10px;border:1px solid color-mix(in oklch, var(--bad) 45%, var(--border));color:var(--bad);font-size:13px;font-weight:700;box-sizing:border-box;" data-action="deleteMyAccount">Eliminar mi cuenta</button>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:8px;">Borra tus datos personales (salud, plan, mensajes, carreras, pagos) de forma permanente y te desconecta. El acceso queda desactivado para el club; si necesitás que se borre por completo, pedíselo al coach.</div>
     </div>`;
 }
 
@@ -3349,6 +3354,25 @@ const ACTIONS = {
     }
     setState({ loginLoading: false });
     enterAccount(email, acc);
+  },
+  // Borra los datos personales del atleta y lo oculta del roster del coach (misma bandera
+  // que "Quitar atleta" — no hay forma de diferenciarlo desde ahí, y no hace falta: en los
+  // dos casos el login técnico sigue existiendo hasta que un admin lo borre a mano desde el
+  // dashboard de Supabase, la clave pública que usa la app no tiene permiso para eso).
+  deleteMyAccount: () => {
+    if (
+      !confirm(
+        "¿Eliminar tu cuenta de TempRun? Se van a borrar tus datos personales (salud, plan, mensajes, carreras, comprobantes de pago) de forma permanente y vas a salir de la app. Esta acción no se puede deshacer."
+      )
+    )
+      return;
+    const wiped = defaultProfileState();
+    wiped.fullName = "(cuenta eliminada)";
+    wiped.removedByCoach = true;
+    Object.assign(state.profile, wiped);
+    persistCurrentProfile();
+    pushLeaderboardSelf(); // limpia también su fila en la pista Social (nombre/puntos/avatar)
+    ACTIONS.logout();
   },
   logout: () => {
     if (sb) sb.auth.signOut();
