@@ -174,6 +174,25 @@ const PLAN_TYPE_OPTIONS = [
   ["caco", "CACO (caminar-correr)"],
 ];
 
+// Presets del avatar de la pista TempRun (no confundir con la foto de perfil real).
+const HAIR_STYLES = [
+  { key: "corto", label: "Corto" },
+  { key: "largo", label: "Largo" },
+  { key: "rulos", label: "Rulos" },
+  { key: "gorra", label: "Gorra" },
+];
+const HAIR_COLORS = ["#1a1a1a", "#5c3a21", "#c99a4b", "#e63946", "#9ca3af"];
+const SKIN_TONES = ["#f5d0b0", "#e0a978", "#c88a5c", "#8d5a3c", "#5c3a26"];
+const OUTFITS = [
+  { key: "azul", label: "Azul TempRun", shirt: "#1d4ed8", short: "#111827", shoes: "#f97316" },
+  { key: "rojo", label: "Rojo Carrera", shirt: "#dc2626", short: "#111827", shoes: "#ffffff" },
+  { key: "verde", label: "Verde Trail", shirt: "#16a34a", short: "#111827", shoes: "#eab308" },
+  { key: "violeta", label: "Violeta Night", shirt: "#7c3aed", short: "#111827", shoes: "#22d3ee" },
+  { key: "negro", label: "Negro Pro", shirt: "#111827", short: "#1f2937", shoes: "#ef4444" },
+  { key: "blanco", label: "Blanco Clásico", shirt: "#f8fafc", short: "#1f2937", shoes: "#2563eb" },
+];
+const DEFAULT_AVATAR_BUILDER = { hair: "corto", hairColor: "#1a1a1a", skinTone: "#e0a978", outfit: "azul" };
+
 function defaultProfileState() {
   return {
     fullName: "",
@@ -222,6 +241,11 @@ function defaultProfileState() {
     // el coach lo puede sacar de su lista de atletas sin borrar la cuenta (eso requiere
     // privilegios de administrador en Supabase) — queda reversible desde "Dados de baja".
     removedByCoach: false,
+    // mascota/avatar de la pista TempRun — se arma con presets (pelo, color, outfit), no es
+    // la foto de perfil real. bonusPoints/lastRewardClaimedDate son de la recompensa diaria.
+    avatarBuilder: { ...DEFAULT_AVATAR_BUILDER },
+    bonusPoints: 0,
+    lastRewardClaimedDate: "",
   };
 }
 
@@ -246,6 +270,7 @@ let state = {
   onboardingStep: 1,
   compileStep: 0,
   theme: "dark",
+  dailyRewardResult: null, // monto ganado en esta sesión, solo para el mensaje de feedback
   athleteTab: "panel",
   perfilTab: "datos", // datos | carreras | fisiologia | salud | membresia
   rutinasSubTab: "tecnica", // tecnica | elongacion
@@ -924,7 +949,9 @@ function computeGamification(profile, currentWeekHint) {
     if (mi.totalKm > 0 && mi.pct === 100) streakWeeks++;
     else break;
   }
-  const points = totalCompleted * 10 + Math.round(totalKmCompleted) * 5;
+  const trainingPoints = totalCompleted * 10 + Math.round(totalKmCompleted) * 5;
+  const bonusPoints = profile.bonusPoints || 0;
+  const points = trainingPoints + bonusPoints;
   let tierIdx = 0;
   for (let i = 0; i < GAMIFICATION_TIERS.length; i++) if (points >= GAMIFICATION_TIERS[i].min) tierIdx = i;
   const tier = GAMIFICATION_TIERS[tierIdx];
@@ -939,7 +966,49 @@ function computeGamification(profile, currentWeekHint) {
     { key: "race", label: "Primera carrera registrada", emoji: "🎽", done: (profile.raceLog || []).length >= 1 },
     { key: "streak4", label: "Racha de 4 semanas perfectas", emoji: "🔥", done: streakWeeks >= 4 },
   ];
-  return { totalCompleted, totalKmCompleted: Math.round(totalKmCompleted * 10) / 10, points, tier, tierIdx, nextTier, progressToNext, streakWeeks, badges };
+  return { totalCompleted, totalKmCompleted: Math.round(totalKmCompleted * 10) / 10, trainingPoints, bonusPoints, points, tier, tierIdx, nextTier, progressToNext, streakWeeks, badges };
+}
+
+// La recompensa diaria nunca resta puntos — solo varía cuánto suma (como el cofre de
+// Duolingo). Restar al azar sin que el atleta hizo nada mal rompería el principio de que
+// los puntos siempre reflejan esfuerzo real, y desmotiva más de lo que engancha.
+const DAILY_REWARD_OPTIONS = [
+  { amount: 5, weight: 35 },
+  { amount: 10, weight: 30 },
+  { amount: 15, weight: 18 },
+  { amount: 25, weight: 12 },
+  { amount: 50, weight: 5 },
+];
+function pickDailyReward() {
+  const total = DAILY_REWARD_OPTIONS.reduce((sum, o) => sum + o.weight, 0);
+  let r = Math.random() * total;
+  for (const o of DAILY_REWARD_OPTIONS) {
+    if (r < o.weight) return o.amount;
+    r -= o.weight;
+  }
+  return DAILY_REWARD_OPTIONS[0].amount;
+}
+
+function renderRunnerSVG(builder, size) {
+  const b = builder || DEFAULT_AVATAR_BUILDER;
+  const outfit = OUTFITS.find((o) => o.key === b.outfit) || OUTFITS[0];
+  const hairPaths = {
+    corto: `<path d="M6 8a6 6 0 0 1 12 0v1H6V8z" fill="${b.hairColor}"/>`,
+    largo: `<path d="M6 8a6 6 0 0 1 12 0v6h-2v-4a4 4 0 0 0-8 0v4H6V8z" fill="${b.hairColor}"/>`,
+    rulos: `<circle cx="8" cy="5" r="2.2" fill="${b.hairColor}"/><circle cx="12" cy="3.5" r="2.6" fill="${b.hairColor}"/><circle cx="16" cy="5" r="2.2" fill="${b.hairColor}"/>`,
+    gorra: `<path d="M5 8a7 7 0 0 1 14 0H5z" fill="${b.hairColor}"/><rect x="15" y="6.3" width="7.5" height="2.2" rx="1.1" fill="${b.hairColor}"/>`,
+  };
+  return `
+    <svg viewBox="0 0 24 40" width="${size}" height="${Math.round((size * 40) / 24)}">
+      <ellipse cx="9.5" cy="38" rx="3" ry="1.8" fill="${outfit.shoes}"/>
+      <ellipse cx="15.5" cy="38" rx="3" ry="1.8" fill="${outfit.shoes}"/>
+      <rect x="8" y="30" width="3" height="8" fill="${b.skinTone}"/>
+      <rect x="13" y="30" width="3" height="8" fill="${b.skinTone}"/>
+      <rect x="7" y="24" width="10" height="7" rx="2" fill="${outfit.short}"/>
+      <rect x="6.5" y="14" width="11" height="12" rx="3" fill="${outfit.shirt}"/>
+      <circle cx="12" cy="8" r="6" fill="${b.skinTone}"/>
+      ${hairPaths[b.hair] || hairPaths.corto}
+    </svg>`;
 }
 
 function renderAvatarInner(profile, letter) {
@@ -1549,6 +1618,10 @@ function renderProgresoTab(profile, currentWeekHint) {
       </div>
     </div>
 
+    ${renderProgressTrack(profile, g)}
+    ${renderAvatarBuilder(profile)}
+    ${renderDailyRewardCard(profile)}
+
     <div class="perfil-panel" style="max-width:640px;">
       <div class="perfil-panel-heading">${ICONS.trophy} LOGROS</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-top:12px;">
@@ -1562,6 +1635,84 @@ function renderProgresoTab(profile, currentWeekHint) {
           )
           .join("")}
       </div>
+    </div>`;
+}
+
+function renderProgressTrack(profile, g) {
+  const meta = GAMIFICATION_TIERS[GAMIFICATION_TIERS.length - 1].min;
+  const pct = Math.min(100, Math.round((g.points / meta) * 100));
+  const markers = GAMIFICATION_TIERS.map((t) => ({ ...t, pct: Math.min(100, Math.round((t.min / meta) * 100)) }));
+  return `
+    <div class="perfil-panel" style="max-width:640px;margin-bottom:22px;">
+      <div class="perfil-panel-heading">🏁 PISTA TEMPRUN</div>
+      <div style="font-size:12px;color:var(--muted);margin:-8px 0 26px;">${g.points} / ${meta} puntos hacia la meta${g.points >= meta ? " · ¡Meta alcanzada!" : ""}</div>
+      <div style="position:relative;height:46px;margin:0 6px 6px;">
+        <div style="position:absolute;top:22px;left:0;right:0;height:4px;background:var(--surface2);border-radius:2px;"></div>
+        <div style="position:absolute;top:22px;left:0;height:4px;width:${pct}%;background:var(--accent);border-radius:2px;transition:width .3s;"></div>
+        ${markers
+          .map(
+            (mk) =>
+              `<div title="${esc(mk.name)} (${mk.min} pts)" style="position:absolute;top:18px;left:calc(${mk.pct}% - 5px);width:10px;height:10px;border-radius:50%;background:${g.points >= mk.min ? "var(--accent)" : "var(--surface2)"};border:2px solid var(--surface);"></div>`
+          )
+          .join("")}
+        <div style="position:absolute;top:-16px;left:calc(${pct}% - 14px);width:28px;transition:left .3s;">${renderRunnerSVG(profile.avatarBuilder, 28)}</div>
+        <div style="position:absolute;top:8px;right:-6px;font-size:22px;">🏁</div>
+      </div>
+    </div>`;
+}
+
+function renderAvatarBuilder(profile) {
+  const b = profile.avatarBuilder || DEFAULT_AVATAR_BUILDER;
+  return `
+    <div class="perfil-panel" style="max-width:640px;margin-bottom:22px;">
+      <div class="perfil-panel-heading">CREÁ TU AVATAR</div>
+      <div style="display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap;margin-top:8px;">
+        <div style="flex:none;">${renderRunnerSVG(b, 84)}</div>
+        <div style="flex:1;min-width:220px;display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <div class="ob-label">PELO</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+              ${HAIR_STYLES.map((h) => `<button type="button" data-action="setAvatarHair" data-val="${h.key}" style="all:unset;cursor:pointer;font-size:11.5px;font-weight:700;padding:7px 12px;border-radius:8px;background:${b.hair === h.key ? "var(--accent)" : "var(--surface2)"};color:${b.hair === h.key ? "var(--accent-ink)" : "var(--text)"};">${h.label}</button>`).join("")}
+            </div>
+          </div>
+          <div>
+            <div class="ob-label">COLOR DE PELO</div>
+            <div style="display:flex;gap:8px;margin-top:4px;">
+              ${HAIR_COLORS.map((c) => `<button type="button" data-action="setAvatarHairColor" data-val="${c}" style="all:unset;cursor:pointer;width:24px;height:24px;border-radius:50%;background:${c};border:2px solid ${b.hairColor === c ? "var(--accent)" : "var(--border)"};"></button>`).join("")}
+            </div>
+          </div>
+          <div>
+            <div class="ob-label">TONO DE PIEL</div>
+            <div style="display:flex;gap:8px;margin-top:4px;">
+              ${SKIN_TONES.map((c) => `<button type="button" data-action="setAvatarSkin" data-val="${c}" style="all:unset;cursor:pointer;width:24px;height:24px;border-radius:50%;background:${c};border:2px solid ${b.skinTone === c ? "var(--accent)" : "var(--border)"};"></button>`).join("")}
+            </div>
+          </div>
+          <div>
+            <div class="ob-label">ROPA Y ZAPATILLAS</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+              ${OUTFITS.map(
+                (o) =>
+                  `<button type="button" data-action="setAvatarOutfit" data-val="${o.key}" style="all:unset;cursor:pointer;font-size:11.5px;font-weight:700;padding:7px 12px;border-radius:8px;background:${b.outfit === o.key ? "var(--accent)" : "var(--surface2)"};color:${b.outfit === o.key ? "var(--accent-ink)" : "var(--text)"};display:inline-flex;align-items:center;gap:6px;"><span style="width:10px;height:10px;border-radius:50%;background:${o.shoes};display:inline-block;flex:none;"></span>${o.label}</button>`
+              ).join("")}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDailyRewardCard(profile) {
+  const today = new Date().toISOString().slice(0, 10);
+  const claimedToday = profile.lastRewardClaimedDate === today;
+  return `
+    <div class="perfil-panel" style="max-width:640px;margin-bottom:22px;text-align:center;">
+      <div class="perfil-panel-heading" style="justify-content:center;">🎁 RECOMPENSA DEL DÍA</div>
+      ${
+        claimedToday
+          ? `<div style="font-size:12.5px;color:var(--muted);margin-top:8px;">${state.dailyRewardResult != null ? `¡Ganaste <b style="color:var(--accent);">+${state.dailyRewardResult} puntos</b> para tu pista! ` : "Ya abriste tu recompensa de hoy. "}Volvé mañana por otra.</div>`
+          : `<div style="font-size:12px;color:var(--muted);margin:8px 0 14px;">Una vez por día podés abrir un premio sorpresa de puntos extra para avanzar en la pista.</div>
+             <button type="button" class="btn-accent" style="width:auto;padding:12px 24px;margin:0;" data-action="claimDailyReward">Abrir recompensa 🎁</button>`
+      }
     </div>`;
 }
 
@@ -3052,6 +3203,17 @@ const ACTIONS = {
     if (el) el.click();
   },
   avatarRemove: () => setProfile({ avatarDataUrl: "" }),
+  setAvatarHair: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, hair: el.dataset.val } })),
+  setAvatarHairColor: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, hairColor: el.dataset.val } })),
+  setAvatarSkin: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, skinTone: el.dataset.val } })),
+  setAvatarOutfit: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, outfit: el.dataset.val } })),
+  claimDailyReward: () => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (state.profile.lastRewardClaimedDate === today) return;
+    const amount = pickDailyReward();
+    setProfile((p) => ({ bonusPoints: (p.bonusPoints || 0) + amount, lastRewardClaimedDate: today }));
+    setState({ dailyRewardResult: amount });
+  },
   setRutinasSubTab: (el) => setState({ rutinasSubTab: el.dataset.tab }),
   setTecnicaSubTab: (el) => setState({ tecnicaSubTab: el.dataset.tab }),
   toggleElongacionSide: () => setState((s) => ({ elongacionSide: s.elongacionSide === "frente" ? "espalda" : "frente", elongacionZone: null })),
