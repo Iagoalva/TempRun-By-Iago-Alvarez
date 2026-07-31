@@ -195,6 +195,11 @@ async function pullLeaderboard() {
 // disponibles igual gracias al hoisting.
 async function pushLeaderboardSelf() {
   if (!sb || state.role !== "athlete" || !state.profile || !state.currentEmail) return;
+  // mismo criterio que usa el coach para su roster (getAllAthleteAccounts): sin esto, un
+  // atleta recién registrado que todavía no terminó el onboarding — o uno que el coach ya
+  // sacó del roster — aparecía en Social igual, porque este push corre cada 8s para
+  // cualquier sesión de atleta, sin fijarse si ya tiene un plan armado.
+  if (!state.profile.onboardingDone || state.profile.removedByCoach) return;
   const acc = accountsCache[state.currentEmail];
   if (!acc || !acc.id) return;
   const g = computeGamification(state.profile, state.weekIndex);
@@ -211,6 +216,23 @@ async function pushLeaderboardSelf() {
     if (error) console.warn("Supabase: no se pudo actualizar el ranking social", error.message);
   } catch (e) {
     console.warn("Supabase: error de red al actualizar el ranking social", e);
+  }
+}
+
+// Usada solo por "Eliminar mi cuenta": a diferencia de pushLeaderboardSelf, esta SÍ tiene
+// que escribir aunque removedByCoach ya esté en true (es lo que la puso en true) — el
+// objetivo es justamente anonimizar la fila, no dejarla como estaba.
+async function clearLeaderboardSelf() {
+  if (!sb || !state.currentEmail) return;
+  const acc = accountsCache[state.currentEmail];
+  if (!acc || !acc.id) return;
+  try {
+    const { error } = await sb
+      .from("leaderboard")
+      .upsert({ id: acc.id, email: state.currentEmail, full_name: "(cuenta eliminada)", avatar_builder: DEFAULT_AVATAR_BUILDER, points: 0, weekly_km: 0 });
+    if (error) console.warn("Supabase: no se pudo limpiar el ranking social", error.message);
+  } catch (e) {
+    console.warn("Supabase: error de red al limpiar el ranking social", e);
   }
 }
 const GROUP_LABELS = { "3k": "3K", "5k": "5K", "10k": "10K" };
@@ -3371,7 +3393,7 @@ const ACTIONS = {
     wiped.removedByCoach = true;
     Object.assign(state.profile, wiped);
     persistCurrentProfile();
-    pushLeaderboardSelf(); // limpia también su fila en la pista Social (nombre/puntos/avatar)
+    clearLeaderboardSelf(); // limpia también su fila en la pista Social (nombre/puntos/avatar)
     ACTIONS.logout();
   },
   logout: () => {
