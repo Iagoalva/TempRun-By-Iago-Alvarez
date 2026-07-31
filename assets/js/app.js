@@ -66,6 +66,10 @@ const COACH_WRITABLE_PROFILE_FIELDS = ["chatMessages", "coachMessage", "dayOverr
 // dispositivo compartido). Se rehidrata desde Supabase al iniciar sesión o al sincronizar.
 let accountsCache = {};
 let lastPushedSnapshot = {};
+// { [email]: { id, email, full_name, avatar_builder, points, weekly_km } } — solo lo público
+// para la pista Social (tabla "leaderboard" aparte de "profiles", con su propio RLS: se
+// puede leer entre todos los atletas, pero cada uno solo puede escribir su propia fila).
+let leaderboardCache = {};
 
 function loadAccounts() {
   return accountsCache;
@@ -159,6 +163,54 @@ async function pullAccountsFromSupabase() {
     if (changed) render();
   } catch (e) {
     console.warn("Supabase: error de red al sincronizar", e);
+  }
+}
+
+// Trae la tabla pública "leaderboard" (nombre, avatar, puntos, km semanales de TODOS los
+// atletas) para la pantalla Social. A diferencia de "profiles", esta tabla es de lectura
+// abierta entre atletas — por diseño solo guarda lo que hace falta para la pista/ranking,
+// nunca salud, pagos ni mensajes.
+async function pullLeaderboard() {
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from("leaderboard").select("id,email,full_name,avatar_builder,points,weekly_km");
+    if (error || !data) {
+      if (error) console.warn("Supabase: no se pudo sincronizar el ranking social", error.message);
+      return;
+    }
+    const next = {};
+    data.forEach((row) => {
+      next[row.email] = row;
+    });
+    leaderboardCache = next;
+    if (state.athleteTab === "social" || state.coachView === "social") render();
+  } catch (e) {
+    console.warn("Supabase: error de red al sincronizar el ranking social", e);
+  }
+}
+
+// Publica los datos públicos del atleta logueado en "leaderboard" — se llama periódicamente
+// (nunca para el coach, que no corre la pista). computeGamification/computeWeeklyKm están
+// definidas más abajo en este mismo archivo, pero como son function declarations quedan
+// disponibles igual gracias al hoisting.
+async function pushLeaderboardSelf() {
+  if (!sb || state.role !== "athlete" || !state.profile || !state.currentEmail) return;
+  const acc = accountsCache[state.currentEmail];
+  if (!acc || !acc.id) return;
+  const g = computeGamification(state.profile, state.weekIndex);
+  const row = {
+    id: acc.id,
+    email: state.currentEmail,
+    full_name: state.profile.fullName || state.currentEmail,
+    avatar_builder: state.profile.avatarBuilder || DEFAULT_AVATAR_BUILDER,
+    points: g.points,
+    weekly_km: computeWeeklyKm(state.profile),
+  };
+  try {
+    const { error } = await sb.from("leaderboard").upsert(row);
+    if (error) console.warn("Supabase: no se pudo actualizar el ranking social", error.message);
+  } catch (e) {
+    console.warn("Supabase: error de red al actualizar el ranking social", e);
   }
 }
 const GROUP_LABELS = { "3k": "3K", "5k": "5K", "10k": "10K" };
@@ -2505,18 +2557,32 @@ function unreadCountFor(profile) {
   return profile.chatMessages.slice(readCount).filter((m) => m.from === "athlete").length;
 }
 
-// Usado tanto por el coach (ve a todos, sin restricción) como por el atleta en su propia
-// pantalla de Social — ahí mismo hoy solo va a traer su propia cuenta, porque el servidor
-// (RLS de Supabase) todavía no deja leer perfiles ajenos. El día que se habilite esa lectura
-// compartida, esta misma función empieza a traer a todo el club sin tocar nada más.
+// Usado tanto por el coach como por el atleta en la pantalla Social: lee de la tabla
+// pública "leaderboard" (todos los atletas, sin restricción de RLS), no de "profiles". La
+// propia fila se reemplaza por el valor calculado en vivo del perfil local, para no
+// depender de que el último push al servidor (cada unos segundos) ya haya llegado.
 function getSocialAthletes() {
-  return getAllAthleteAccounts().map(({ email, acc }) => ({
-    email,
-    name: acc.profile.fullName || email,
-    avatarBuilder: acc.profile.avatarBuilder || DEFAULT_AVATAR_BUILDER,
-    ...computeGamification(acc.profile, 0),
-    weeklyKm: computeWeeklyKm(acc.profile),
+  const results = Object.values(leaderboardCache).map((row) => ({
+    email: row.email,
+    name: row.full_name || row.email,
+    avatarBuilder: row.avatar_builder || DEFAULT_AVATAR_BUILDER,
+    points: Number(row.points) || 0,
+    weeklyKm: Number(row.weekly_km) || 0,
   }));
+  if (state.role === "athlete" && state.profile && state.currentEmail) {
+    const g = computeGamification(state.profile, state.weekIndex);
+    const mine = {
+      email: state.currentEmail,
+      name: state.profile.fullName || state.currentEmail,
+      avatarBuilder: state.profile.avatarBuilder || DEFAULT_AVATAR_BUILDER,
+      points: g.points,
+      weeklyKm: computeWeeklyKm(state.profile),
+    };
+    const idx = results.findIndex((r) => r.email === state.currentEmail);
+    if (idx >= 0) results[idx] = mine;
+    else results.push(mine);
+  }
+  return results;
 }
 
 function getAthleteSummaries() {
@@ -3288,6 +3354,7 @@ const ACTIONS = {
     if (sb) sb.auth.signOut();
     accountsCache = {};
     lastPushedSnapshot = {};
+    leaderboardCache = {};
     setState({
       screen: "login",
       loginScreen: "signin",
@@ -3442,7 +3509,13 @@ const ACTIONS = {
     setProfile({ fcRest: String(state.pulseResult) });
     setState({ pulseSaved: true });
   },
-  goTab: (el) => setState({ athleteTab: el.dataset.tab, selectedDayIdx: null, expandedKey: null }),
+  goTab: (el) => {
+    setState({ athleteTab: el.dataset.tab, selectedDayIdx: null, expandedKey: null });
+    if (el.dataset.tab === "social") {
+      pullLeaderboard();
+      pushLeaderboardSelf();
+    }
+  },
   setPerfilTab: (el) => setState({ perfilTab: el.dataset.tab }),
   setActivityLevel: (el) => setProfile({ activityLevel: el.dataset.val }),
   setTheme: (el) => setState({ theme: el.dataset.theme }),
@@ -3533,7 +3606,10 @@ const ACTIONS = {
     setState({ coachView: "detail", selectedAthleteEmail: email, coachWeekIndex: 0, coachExpandedKey: null, coachChatInput: "", coachDetailTab: "plan", coachPerfilTab: "datos" });
   },
   backToRoster: () => setState({ coachView: "roster", selectedAthleteEmail: null }),
-  goCoachSocial: () => setState({ coachView: "social", selectedAthleteEmail: null }),
+  goCoachSocial: () => {
+    setState({ coachView: "social", selectedAthleteEmail: null });
+    pullLeaderboard();
+  },
   coachDetailSetTab: (el) => setState({ coachDetailTab: el.dataset.tab }),
   setCoachPerfilTab: (el) => setState({ coachPerfilTab: el.dataset.tab }),
   toggleRemovedAthletes: () => setState((s) => ({ coachShowRemoved: !s.coachShowRemoved })),
@@ -3800,4 +3876,7 @@ setProfile = function (patch) {
   render();
   pullAccountsFromSupabase();
   setInterval(pullAccountsFromSupabase, SUPABASE_SYNC_INTERVAL_MS);
+  pullLeaderboard();
+  setInterval(pullLeaderboard, SUPABASE_SYNC_INTERVAL_MS);
+  setInterval(pushLeaderboardSelf, SUPABASE_SYNC_INTERVAL_MS);
 })();
