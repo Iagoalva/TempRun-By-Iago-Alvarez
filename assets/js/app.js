@@ -254,6 +254,8 @@ let state = {
   coachView: "roster", // roster | detail
   selectedAthleteEmail: null,
   coachBroadcast: "",
+  coachDetailTab: "plan", // plan | perfil
+  coachPerfilTab: "datos",
   coachWeekIndex: 0,
   coachExpandedKey: null,
   coachChatInput: "",
@@ -1601,7 +1603,7 @@ function renderPerfilFisiologia(s) {
   const fcRest = parseFloat(s.fcRest) || 0;
   const bmi = computeBMI(s.weight, s.height);
   const bmr = computeBMR(s.weight, s.height, age, s.gender);
-  const m = computeRenderModel();
+  const m = computeRenderModel(s);
   const tdee = computeTDEE(bmr, s.activityLevel, s.weight, m.totalKm);
   const healthyRange = healthyWeightRange(s.height);
   const metabolicAge = bmi ? computeMetabolicAge(age, bmi.category, s.fcRest, m.totalKm, m.level) : null;
@@ -2213,6 +2215,34 @@ function renderCoachRoster(athletes) {
     }`;
 }
 
+// Convierte el markup de las pestañas de Perfil (pensadas para que el propio atleta las
+// edite) en una vista de solo lectura para el coach: deshabilita los inputs y quita las
+// acciones que mutan datos (subir archivos, conectar Strava, agregar carreras, etc.),
+// sin tener que duplicar cada función de render.
+function makeReadOnly(html) {
+  return html
+    .replace(/<(input|select|textarea)\b/g, "<$1 disabled")
+    .replace(/\sdata-action="[^"]*"/g, "")
+    .replace(/\sdata-bind="[^"]*"/g, "");
+}
+
+function renderCoachPerfil(profile) {
+  const tab = state.coachPerfilTab || "datos";
+  const bodies = {
+    datos: renderPerfilDatos(profile),
+    carreras: renderMyMarks(profile) + renderRaceLog(profile),
+    fisiologia: renderPerfilFisiologia(profile),
+    salud: renderPerfilSalud(profile),
+    membresia: renderPerfilMembresia(profile),
+  };
+  return `
+    <div class="perfil-tabs" style="margin-bottom:18px;">
+      ${PERFIL_TABS.map((t) => `<button class="perfil-tab-btn ${tab === t.key ? "active" : ""}" data-action="setCoachPerfilTab" data-tab="${t.key}">${t.label}</button>`).join("")}
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:16px;">Vista de solo lectura — esta es la información que cargó el atleta.</div>
+    ${makeReadOnly(bodies[tab] || bodies.datos)}`;
+}
+
 function renderCoachDetail() {
   const accounts = loadAccounts();
   const acc = accounts[state.selectedAthleteEmail];
@@ -2265,6 +2295,15 @@ function renderCoachDetail() {
       </div>
     </div>
 
+    <div class="perfil-tabs" style="margin-bottom:20px;">
+      <button class="perfil-tab-btn ${(state.coachDetailTab || "plan") === "plan" ? "active" : ""}" data-action="coachDetailSetTab" data-tab="plan">PLAN</button>
+      <button class="perfil-tab-btn ${state.coachDetailTab === "perfil" ? "active" : ""}" data-action="coachDetailSetTab" data-tab="perfil">PERFIL DEL ATLETA</button>
+    </div>
+
+    ${
+      state.coachDetailTab === "perfil"
+        ? renderCoachPerfil(profile)
+        : `
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;">
       <div class="plan-header" style="margin-bottom:8px;">
         <div>
@@ -2324,7 +2363,8 @@ function renderCoachDetail() {
           )
           .join("")}
       </div>
-    </div>`;
+    </div>`
+    }`;
 }
 
 function esc(str) {
@@ -2909,9 +2949,11 @@ const ACTIONS = {
       acc.profile.coachReadCount = acc.profile.chatMessages.length;
       saveAccounts(accounts);
     }
-    setState({ coachView: "detail", selectedAthleteEmail: email, coachWeekIndex: 0, coachExpandedKey: null, coachChatInput: "" });
+    setState({ coachView: "detail", selectedAthleteEmail: email, coachWeekIndex: 0, coachExpandedKey: null, coachChatInput: "", coachDetailTab: "plan", coachPerfilTab: "datos" });
   },
   backToRoster: () => setState({ coachView: "roster", selectedAthleteEmail: null }),
+  coachDetailSetTab: (el) => setState({ coachDetailTab: el.dataset.tab }),
+  setCoachPerfilTab: (el) => setState({ coachPerfilTab: el.dataset.tab }),
   coachWeekPrev: () => setState((s) => ({ coachWeekIndex: Math.max(0, (s.coachWeekIndex || 0) - 1), coachExpandedKey: null })),
   coachWeekNext: () => setState((s) => ({ coachWeekIndex: (s.coachWeekIndex || 0) + 1, coachExpandedKey: null })),
   coachJumpWeek: (el) => setState({ coachWeekIndex: parseInt(el.dataset.idx, 10), coachExpandedKey: null }),
