@@ -246,6 +246,9 @@ function defaultProfileState() {
     avatarBuilder: { ...DEFAULT_AVATAR_BUILDER },
     bonusPoints: 0,
     lastRewardClaimedDate: "",
+    // fecha real en la que se compiló el plan por primera vez — ancla la semana 0 a un
+    // calendario real, para poder calcular "esta semana" igual para todos los atletas.
+    planStartDate: "",
   };
 }
 
@@ -271,6 +274,7 @@ let state = {
   compileStep: 0,
   theme: "dark",
   dailyRewardResult: null, // monto ganado en esta sesión, solo para el mensaje de feedback
+  avatarPreviewDataUrl: null, // foto recién elegida, pendiente de confirmar antes de guardarla
   athleteTab: "panel",
   perfilTab: "datos", // datos | carreras | fisiologia | salud | membresia
   rutinasSubTab: "tecnica", // tecnica | elongacion
@@ -924,12 +928,15 @@ function computeRenderModel(profile, weekIndexParam) {
   };
 }
 
+// Meta larga a propósito: con el ritmo típico de entrenamientos + km de un plan, llegar a
+// Leyenda tiene que sentirse como cerrar una temporada entera, no las primeras semanas.
 const GAMIFICATION_TIERS = [
   { min: 0, name: "Semilla", emoji: "🌱" },
-  { min: 50, name: "Brote", emoji: "🌿" },
-  { min: 150, name: "Corredor", emoji: "🏃" },
-  { min: 350, name: "Atleta", emoji: "🏅" },
-  { min: 700, name: "Leyenda", emoji: "🏆" },
+  { min: 150, name: "Brote", emoji: "🌿" },
+  { min: 500, name: "Corredor", emoji: "🏃" },
+  { min: 1200, name: "Atleta", emoji: "🏅" },
+  { min: 2200, name: "Campeón", emoji: "🥇" },
+  { min: 4000, name: "Leyenda", emoji: "🏆" },
 ];
 
 // Todo se calcula al vuelo a partir de profile.completed / raceLog / el plan — no se guarda
@@ -957,16 +964,49 @@ function computeGamification(profile, currentWeekHint) {
   const tier = GAMIFICATION_TIERS[tierIdx];
   const nextTier = GAMIFICATION_TIERS[tierIdx + 1] || null;
   const progressToNext = nextTier ? Math.round(((points - tier.min) / (nextTier.min - tier.min)) * 100) : 100;
+  const racesLogged = (profile.raceLog || []).length;
   const badges = [
     { key: "first", label: "Primer entrenamiento", emoji: "🥇", done: totalCompleted >= 1 },
+    { key: "five", label: "5 entrenamientos", emoji: "5️⃣", done: totalCompleted >= 5 },
     { key: "ten", label: "10 entrenamientos", emoji: "🔟", done: totalCompleted >= 10 },
+    { key: "twentyfive", label: "25 entrenamientos", emoji: "🎯", done: totalCompleted >= 25 },
     { key: "fifty_sessions", label: "50 entrenamientos", emoji: "💯", done: totalCompleted >= 50 },
+    { key: "hundred_sessions", label: "100 entrenamientos", emoji: "🏆", done: totalCompleted >= 100 },
+    { key: "km10", label: "10km acumulados", emoji: "🐣", done: totalKmCompleted >= 10 },
     { key: "km50", label: "50km acumulados", emoji: "🏁", done: totalKmCompleted >= 50 },
     { key: "km100", label: "100km acumulados", emoji: "🚀", done: totalKmCompleted >= 100 },
-    { key: "race", label: "Primera carrera registrada", emoji: "🎽", done: (profile.raceLog || []).length >= 1 },
+    { key: "km250", label: "250km acumulados", emoji: "🌍", done: totalKmCompleted >= 250 },
+    { key: "km500", label: "500km acumulados", emoji: "🛰️", done: totalKmCompleted >= 500 },
+    { key: "race", label: "Primera carrera registrada", emoji: "🎽", done: racesLogged >= 1 },
+    { key: "race3", label: "3 carreras registradas", emoji: "🏅", done: racesLogged >= 3 },
+    { key: "streak2", label: "Racha de 2 semanas perfectas", emoji: "✨", done: streakWeeks >= 2 },
     { key: "streak4", label: "Racha de 4 semanas perfectas", emoji: "🔥", done: streakWeeks >= 4 },
+    { key: "streak8", label: "Racha de 8 semanas perfectas", emoji: "☄️", done: streakWeeks >= 8 },
+    { key: "tier_corredor", label: "Nivel Corredor alcanzado", emoji: "🏃", done: points >= 500 },
+    { key: "tier_campeon", label: "Nivel Campeón alcanzado", emoji: "👑", done: points >= 2200 },
+    { key: "avatar", label: "Avatar personalizado", emoji: "🎨", done: !!profile.avatarBuilder && JSON.stringify(profile.avatarBuilder) !== JSON.stringify(DEFAULT_AVATAR_BUILDER) },
+    { key: "reward", label: "Primera recompensa diaria", emoji: "🎁", done: bonusPoints > 0 },
   ];
   return { totalCompleted, totalKmCompleted: Math.round(totalKmCompleted * 10) / 10, trainingPoints, bonusPoints, points, tier, tierIdx, nextTier, progressToNext, streakWeeks, badges };
+}
+
+// Ancla la semana 0 del plan a la fecha real en que se compiló, para poder calcular "esta
+// semana" de la misma forma para todos los atletas — sin esto, cada uno podría estar
+// "parado" en una semana distinta de su plan solo por cómo navegó la pantalla, y el ranking
+// semanal no compararía manzanas con manzanas.
+function currentWeekIndexFromDate(profile, totalWeeks) {
+  if (!profile.planStartDate) return 0;
+  const start = new Date(profile.planStartDate + "T00:00:00");
+  const days = Math.floor((Date.now() - start.getTime()) / 86400000);
+  return Math.max(0, Math.min(totalWeeks - 1, Math.floor(days / 7)));
+}
+
+function computeWeeklyKm(profile) {
+  const m0 = computeRenderModel(profile, 0);
+  const totalWeeks = m0.macro.totalWeeks;
+  const idx = currentWeekIndexFromDate(profile, totalWeeks);
+  const m = idx === 0 ? m0 : computeRenderModel(profile, idx);
+  return Math.round(m.doneKm * 10) / 10;
 }
 
 // La recompensa diaria nunca resta puntos — solo varía cuánto suma (como el cofre de
@@ -989,7 +1029,7 @@ function pickDailyReward() {
   return DAILY_REWARD_OPTIONS[0].amount;
 }
 
-function renderRunnerSVG(builder, size) {
+function runnerSVGInner(builder) {
   const b = builder || DEFAULT_AVATAR_BUILDER;
   const outfit = OUTFITS.find((o) => o.key === b.outfit) || OUTFITS[0];
   const hairPaths = {
@@ -999,16 +1039,18 @@ function renderRunnerSVG(builder, size) {
     gorra: `<path d="M5 8a7 7 0 0 1 14 0H5z" fill="${b.hairColor}"/><rect x="15" y="6.3" width="7.5" height="2.2" rx="1.1" fill="${b.hairColor}"/>`,
   };
   return `
-    <svg viewBox="0 0 24 40" width="${size}" height="${Math.round((size * 40) / 24)}">
-      <ellipse cx="9.5" cy="38" rx="3" ry="1.8" fill="${outfit.shoes}"/>
-      <ellipse cx="15.5" cy="38" rx="3" ry="1.8" fill="${outfit.shoes}"/>
-      <rect x="8" y="30" width="3" height="8" fill="${b.skinTone}"/>
-      <rect x="13" y="30" width="3" height="8" fill="${b.skinTone}"/>
-      <rect x="7" y="24" width="10" height="7" rx="2" fill="${outfit.short}"/>
-      <rect x="6.5" y="14" width="11" height="12" rx="3" fill="${outfit.shirt}"/>
-      <circle cx="12" cy="8" r="6" fill="${b.skinTone}"/>
-      ${hairPaths[b.hair] || hairPaths.corto}
-    </svg>`;
+    <ellipse cx="9.5" cy="38" rx="3" ry="1.8" fill="${outfit.shoes}"/>
+    <ellipse cx="15.5" cy="38" rx="3" ry="1.8" fill="${outfit.shoes}"/>
+    <rect x="8" y="30" width="3" height="8" fill="${b.skinTone}"/>
+    <rect x="13" y="30" width="3" height="8" fill="${b.skinTone}"/>
+    <rect x="7" y="24" width="10" height="7" rx="2" fill="${outfit.short}"/>
+    <rect x="6.5" y="14" width="11" height="12" rx="3" fill="${outfit.shirt}"/>
+    <circle cx="12" cy="8" r="6" fill="${b.skinTone}"/>
+    ${hairPaths[b.hair] || hairPaths.corto}`;
+}
+
+function renderRunnerSVG(builder, size) {
+  return `<svg viewBox="0 0 24 40" width="${size}" height="${Math.round((size * 40) / 24)}">${runnerSVGInner(builder)}</svg>`;
 }
 
 function renderAvatarInner(profile, letter) {
@@ -1029,6 +1071,7 @@ function renderApp() {
     { key: "tools", icon: ICONS.tools, label: "Herramientas" },
     { key: "rutinas", icon: ICONS.rutinas, label: "Rutinas" },
     { key: "progreso", icon: ICONS.medal, label: "Progreso" },
+    { key: "social", icon: ICONS.people, label: "Social" },
     { key: "perfil", icon: ICONS.perfil, label: "Perfil" },
   ];
 
@@ -1063,6 +1106,7 @@ function renderApp() {
         ${state.athleteTab === "tools" ? renderToolsTab() : ""}
         ${state.athleteTab === "rutinas" ? renderRutinasTab() : ""}
         ${state.athleteTab === "progreso" ? renderProgresoTab(state.profile, state.weekIndex) : ""}
+        ${state.athleteTab === "social" ? renderSocialTab() : ""}
         ${state.athleteTab === "perfil" ? renderPerfil() : ""}
       </div>
     </main>
@@ -1592,6 +1636,8 @@ function renderProgresoTab(profile, currentWeekHint) {
     <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Progreso</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:22px;">Tu avatar sube de nivel a medida que sumás entrenamientos y kilómetros.</div>
 
+    ${renderDailyRewardCard(profile)}
+
     <div class="perfil-panel" style="max-width:640px;margin-bottom:22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
       <div style="font-size:64px;line-height:1;width:88px;height:88px;border-radius:50%;background:var(--surface2);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;flex:none;">${g.tier.emoji}</div>
       <div style="flex:1;min-width:200px;">
@@ -1620,7 +1666,6 @@ function renderProgresoTab(profile, currentWeekHint) {
 
     ${renderProgressTrack(profile, g)}
     ${renderAvatarBuilder(profile)}
-    ${renderDailyRewardCard(profile)}
 
     <div class="perfil-panel" style="max-width:640px;">
       <div class="perfil-panel-heading">${ICONS.trophy} LOGROS</div>
@@ -1713,6 +1758,139 @@ function renderDailyRewardCard(profile) {
           : `<div style="font-size:12px;color:var(--muted);margin:8px 0 14px;">Una vez por día podés abrir un premio sorpresa de puntos extra para avanzar en la pista.</div>
              <button type="button" class="btn-accent" style="width:auto;padding:12px 24px;margin:0;" data-action="claimDailyReward">Abrir recompensa 🎁</button>`
       }
+    </div>`;
+}
+
+// Traza el contorno de una pista tipo estadio (dos rectas + dos semicírculos), la misma
+// forma para cada carril con distinto radio — así los carriles quedan concéntricos de
+// verdad, como una pista de atletismo real.
+function stadiumPathD(cx, cy, Ls, r) {
+  const left = cx - Ls / 2,
+    right = cx + Ls / 2;
+  return `M ${left} ${cy - r} L ${right} ${cy - r} A ${r} ${r} 0 0 1 ${right} ${cy + r} L ${left} ${cy + r} A ${r} ${r} 0 0 1 ${left} ${cy - r} Z`;
+}
+function stadiumPoint(cx, cy, Ls, r, t) {
+  const P = 2 * Ls + 2 * Math.PI * r;
+  let s = (((t % 1) + 1) % 1) * P;
+  if (s < Ls) return { x: cx - Ls / 2 + s, y: cy - r };
+  s -= Ls;
+  const halfCirc = Math.PI * r;
+  if (s < halfCirc) {
+    const theta = -Math.PI / 2 + s / r;
+    return { x: cx + Ls / 2 + r * Math.cos(theta), y: cy + r * Math.sin(theta) };
+  }
+  s -= halfCirc;
+  if (s < Ls) return { x: cx + Ls / 2 - s, y: cy + r };
+  s -= Ls;
+  const theta2 = Math.PI / 2 + s / r;
+  return { x: cx - Ls / 2 + r * Math.cos(theta2), y: cy + r * Math.sin(theta2) };
+}
+
+function renderSocialTrack(athletes, meEmail) {
+  const meta = GAMIFICATION_TIERS[GAMIFICATION_TIERS.length - 1].min;
+  const numLanes = Math.max(1, athletes.length);
+  const laneGap = 15;
+  const minR = 34;
+  const outerR = Math.min(160, minR + (numLanes - 1) * laneGap);
+  const Ls = 440;
+  const padX = 60,
+    padTop = 60,
+    padBottom = 26;
+  const W = Ls + 2 * outerR + padX * 2;
+  const H = 2 * outerR + padTop + padBottom;
+  const cx = W / 2,
+    cy = padTop + outerR;
+
+  const laneOutlines = athletes
+    .map((a, i) => {
+      const r = Math.max(minR * 0.45, outerR - i * laneGap);
+      return `<path d="${stadiumPathD(cx, cy, Ls, r)}" fill="none" stroke="var(--surface3)" stroke-width="1.5"/>`;
+    })
+    .join("");
+
+  const finishX = cx - Ls / 2;
+  const finishLine = `<line x1="${finishX}" y1="${cy - outerR - 8}" x2="${finishX}" y2="${cy + outerR + 8}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="${finishX}" y="${cy - outerR - 14}" text-anchor="middle" font-size="20">🏁</text>`;
+
+  const tierTicks = GAMIFICATION_TIERS.map((tier) => {
+    const t = Math.min(0.999, tier.min / meta);
+    const p = stadiumPoint(cx, cy, Ls, outerR + 10, t);
+    return `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--surface3)"/><title>${esc(tier.name)} · ${tier.min} pts</title>`;
+  }).join("");
+
+  const runners = athletes
+    .map((a, i) => {
+      const r = Math.max(minR * 0.45, outerR - i * laneGap);
+      const t = Math.min(0.995, a.points / meta);
+      const p = stadiumPoint(cx, cy, Ls, r, t);
+      const isMe = a.email === meEmail;
+      const label = isMe ? "Vos" : a.name.split(" ")[0];
+      return `<g transform="translate(${p.x - 13} ${p.y - 26})">
+          <svg width="26" height="${Math.round((26 * 40) / 24)}" viewBox="0 0 24 40" style="overflow:visible;">${runnerSVGInner(a.avatarBuilder)}</svg>
+          ${!isMe ? `<title>${esc(a.name)} · ${a.points} pts</title>` : ""}
+        </g>
+        ${
+          isMe
+            ? `<text x="${p.x}" y="${p.y - 32}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--accent)">${esc(label)}</text>`
+            : ""
+        }`;
+    })
+    .join("");
+
+  return `
+    <div style="overflow-x:auto;">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" style="max-width:100%;height:auto;display:block;min-width:520px;">
+        ${laneOutlines}
+        ${finishLine}
+        ${tierTicks}
+        ${runners}
+      </svg>
+    </div>`;
+}
+
+function renderSocialWeeklyRanking(athletes) {
+  const maxKm = Math.max(1, ...athletes.map((a) => a.weeklyKm));
+  const byKm = [...athletes].sort((a, b) => b.weeklyKm - a.weeklyKm);
+  const medals = ["🥇", "🥈", "🥉"];
+  return byKm
+    .map(
+      (a, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;${a.isMe || a.email === state.currentEmail ? "background:color-mix(in oklch, var(--accent) 9%, transparent);margin:0 -10px;padding:10px;border-radius:9px;" : ""}">
+      <div style="width:20px;flex:none;font-size:${i < 3 ? "15px" : "12px"};font-weight:800;color:var(--muted);text-align:center;">${i < 3 ? medals[i] : i + 1}</div>
+      <div style="flex:none;width:26px;height:${Math.round((26 * 40) / 24)}px;">${renderRunnerSVG(a.avatarBuilder, 26)}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${a.email === state.currentEmail ? "color:var(--accent);" : ""}">${esc(a.email === state.currentEmail ? "Vos" : a.name)}</div>
+        <div style="height:4px;background:var(--surface2);border-radius:2px;margin-top:4px;"><div style="height:4px;border-radius:2px;background:var(--accent);width:${(a.weeklyKm / maxKm) * 100}%;"></div></div>
+      </div>
+      <div style="flex:none;font-size:12px;font-weight:800;">${a.weeklyKm.toFixed(1)}</div>
+    </div>`
+    )
+    .join("");
+}
+
+function renderSocialTab() {
+  const athletes = getSocialAthletes();
+  if (athletes.length === 0) {
+    return `
+      <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Social</div>
+      <div style="font-size:13px;color:var(--muted);">Todavía no hay atletas para mostrar en la pista.</div>`;
+  }
+  const meta = GAMIFICATION_TIERS[GAMIFICATION_TIERS.length - 1].min;
+  return `
+    <div style="font-size:26px;font-weight:800;margin-bottom:6px;">Social</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:22px;">Toda la comunidad TempRun corriendo la misma pista.</div>
+    <div class="social-grid">
+      <div class="perfil-panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <div class="perfil-panel-heading" style="margin-bottom:0;">🏁 PISTA TEMPRUN · RANKING GENERAL</div>
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap;">Meta: ${meta} pts</span>
+        </div>
+        ${renderSocialTrack(athletes, state.currentEmail)}
+      </div>
+      <div class="perfil-panel">
+        <div class="perfil-panel-heading">RANKING SEMANAL · KM</div>
+        ${renderSocialWeeklyRanking(athletes)}
+      </div>
     </div>`;
 }
 
@@ -2120,6 +2298,20 @@ function renderPerfilDatos(s) {
       <div class="caption" data-action="avatarUploadClick" style="cursor:pointer;">${s.avatarDataUrl ? "CAMBIAR FOTO" : "FOTO DE PERFIL"}</div>
       ${s.avatarDataUrl ? `<button type="button" data-action="avatarRemove" style="all:unset;cursor:pointer;font-size:10.5px;color:var(--muted);text-decoration:underline;margin-top:2px;">Quitar foto</button>` : ""}
     </div>
+    ${
+      state.avatarPreviewDataUrl
+        ? `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;">
+             <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;max-width:340px;width:100%;text-align:center;">
+               <div style="font-size:14px;font-weight:800;margin-bottom:14px;">¿Usar esta foto?</div>
+               <img src="${state.avatarPreviewDataUrl}" alt="Vista previa" style="width:180px;height:180px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);margin:0 auto 18px;display:block;">
+               <div style="display:flex;gap:10px;">
+                 <button type="button" data-action="avatarCancelPreview" style="all:unset;cursor:pointer;flex:1;text-align:center;padding:11px 0;border-radius:8px;background:var(--surface2);color:var(--text);font-size:13px;font-weight:700;">Cancelar</button>
+                 <button type="button" data-action="avatarConfirmPreview" style="all:unset;cursor:pointer;flex:1;text-align:center;padding:11px 0;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-size:13px;font-weight:700;">Usar esta foto</button>
+               </div>
+             </div>
+           </div>`
+        : ""
+    }
     <div class="perfil-fields">
       <div class="perfil-field">${ICONS.person}<input data-bind="profile.fullName" value="${esc(s.fullName)}"></div>
       <div class="perfil-field">${ICONS.phone}<input data-bind="profile.phone" value="${esc(s.phone)}" placeholder="Teléfono"></div>
@@ -2313,6 +2505,20 @@ function unreadCountFor(profile) {
   return profile.chatMessages.slice(readCount).filter((m) => m.from === "athlete").length;
 }
 
+// Usado tanto por el coach (ve a todos, sin restricción) como por el atleta en su propia
+// pantalla de Social — ahí mismo hoy solo va a traer su propia cuenta, porque el servidor
+// (RLS de Supabase) todavía no deja leer perfiles ajenos. El día que se habilite esa lectura
+// compartida, esta misma función empieza a traer a todo el club sin tocar nada más.
+function getSocialAthletes() {
+  return getAllAthleteAccounts().map(({ email, acc }) => ({
+    email,
+    name: acc.profile.fullName || email,
+    avatarBuilder: acc.profile.avatarBuilder || DEFAULT_AVATAR_BUILDER,
+    ...computeGamification(acc.profile, 0),
+    weeklyKm: computeWeeklyKm(acc.profile),
+  }));
+}
+
 function getAthleteSummaries() {
   return getAllAthleteAccounts().map(({ email, acc }) => {
     const m = computeRenderModel(acc.profile, 0);
@@ -2364,7 +2570,8 @@ function renderCoachApp() {
         </div>
       </div>
       <nav class="sidebar-nav">
-        <button class="${state.coachView === "roster" ? "active" : ""}" data-action="backToRoster">${ICONS.people}<span class="nav-label">Panel de atletas</span></button>
+        <button class="${state.coachView === "roster" || state.coachView === "detail" ? "active" : ""}" data-action="backToRoster">${ICONS.people}<span class="nav-label">Panel de atletas</span></button>
+        <button class="${state.coachView === "social" ? "active" : ""}" data-action="goCoachSocial">${ICONS.people}<span class="nav-label">Social</span></button>
       </nav>
       ${
         allAthletes.length > 0
@@ -2417,7 +2624,13 @@ function renderCoachApp() {
     </aside>
     <main class="app-content">
       <div class="content-inner">
-        ${state.coachView === "detail" && state.selectedAthleteEmail ? renderCoachDetail() : renderCoachRoster(athletes)}
+        ${
+          state.coachView === "detail" && state.selectedAthleteEmail
+            ? renderCoachDetail()
+            : state.coachView === "social"
+            ? renderSocialTab()
+            : renderCoachRoster(athletes)
+        }
       </div>
     </main>
   </div>`;
@@ -2786,7 +2999,7 @@ function bindDynamicListeners() {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        setProfile({ avatarDataUrl: reader.result });
+        setState({ avatarPreviewDataUrl: reader.result });
       };
       reader.readAsDataURL(file);
       el.value = "";
@@ -3203,6 +3416,12 @@ const ACTIONS = {
     if (el) el.click();
   },
   avatarRemove: () => setProfile({ avatarDataUrl: "" }),
+  avatarConfirmPreview: () => {
+    if (!state.avatarPreviewDataUrl) return;
+    setProfile({ avatarDataUrl: state.avatarPreviewDataUrl });
+    setState({ avatarPreviewDataUrl: null });
+  },
+  avatarCancelPreview: () => setState({ avatarPreviewDataUrl: null }),
   setAvatarHair: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, hair: el.dataset.val } })),
   setAvatarHairColor: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, hairColor: el.dataset.val } })),
   setAvatarSkin: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, skinTone: el.dataset.val } })),
@@ -3314,6 +3533,7 @@ const ACTIONS = {
     setState({ coachView: "detail", selectedAthleteEmail: email, coachWeekIndex: 0, coachExpandedKey: null, coachChatInput: "", coachDetailTab: "plan", coachPerfilTab: "datos" });
   },
   backToRoster: () => setState({ coachView: "roster", selectedAthleteEmail: null }),
+  goCoachSocial: () => setState({ coachView: "social", selectedAthleteEmail: null }),
   coachDetailSetTab: (el) => setState({ coachDetailTab: el.dataset.tab }),
   setCoachPerfilTab: (el) => setState({ coachPerfilTab: el.dataset.tab }),
   toggleRemovedAthletes: () => setState((s) => ({ coachShowRemoved: !s.coachShowRemoved })),
@@ -3485,7 +3705,9 @@ function compileProgram() {
     // primer mensaje que ve el atleta en el panel, apenas se compila su plan por primera vez —
     // el coach puede reemplazarlo después escribiendo el suyo.
     const welcome = `${g === "Femenino" ? "Bienvenida" : g === "Masculino" ? "Bienvenido" : "Bienvenido/a"} a TempRun by Iago Alvarez. Acá empieza tu camino. ¡Que lo disfrutes!`;
-    setProfile({ onboardingDone: true, coachMessage: welcome });
+    // ancla la semana 0 del plan a una fecha real, para poder calcular "esta semana" en el
+    // ranking semanal sin depender de qué semana esté navegando cada atleta en su pantalla.
+    setProfile({ onboardingDone: true, coachMessage: welcome, planStartDate: new Date().toISOString().slice(0, 10) });
     persistCurrentProfile();
     setState({ screen: "app", athleteTab: "panel", weekIndex: 0 });
     initWeather();

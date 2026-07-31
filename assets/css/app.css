@@ -991,8 +991,19 @@ button {
   min-width: 0;
   overflow-y: auto;
 }
+.social-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .social-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .content-inner {
-  max-width: 1040px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 36px 44px 60px;
 }
