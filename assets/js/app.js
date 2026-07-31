@@ -40,16 +40,17 @@ function sessionIcon(typeTag) {
   return typeTag === "CUESTAS" ? ICONS.mountain : ICONS.lightning;
 }
 
-const ACCOUNTS_KEY = "temprun_accounts";
-const SESSION_KEY = "temprun_session";
+// El coach usa esta cuenta para autopromoverse a role="coach" (ver trigger SQL) — la
+// contraseña real vive únicamente en Supabase Auth, nunca en este archivo.
 const COACH_EMAIL = "coach@temprun.club";
-const COACH_PASSWORD = "TempRun2026";
 
-/* ---------------- SUPABASE (cuentas compartidas entre dispositivos) ----------------
-   La clave "publishable" es segura para exponer en el navegador: la tabla "accounts"
-   tiene una policy de Row Level Security abierta pensada para esta beta cerrada (ver
-   el SQL de setup). localStorage sigue siendo la fuente de verdad instantánea de este
-   dispositivo — Supabase es una capa de sincronización en segundo plano por arriba. */
+/* ---------------- SUPABASE (autenticación + datos compartidos entre dispositivos) ----
+   La clave "publishable" es segura para exponer en el navegador. Las contraseñas las
+   maneja Supabase Auth (hasheadas del lado del servidor, nunca en texto plano acá). El
+   acceso a la tabla "profiles" está restringido por Row Level Security: cada atleta solo
+   puede leer/escribir su propia fila; el coach puede leer/escribir todas (ver SQL de
+   setup). El cache local (accountsCache) es solo un espejo en memoria para que la UI
+   responda al instante — la fuente de verdad es siempre Supabase. */
 const SUPABASE_URL = "https://bhbexadljhubqpsbsale.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_vlCEFRIgMe1XkNvql-YOCg_F5Ho2BkZ";
 const sb = typeof window !== "undefined" && window.supabase && SUPABASE_URL ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
@@ -59,12 +60,36 @@ const SUPABASE_SYNC_INTERVAL_MS = 8000;
 // (todo lo demás sigue mandando el estado local, para no perder ediciones en curso).
 const COACH_WRITABLE_PROFILE_FIELDS = ["chatMessages", "coachMessage", "dayOverrides", "stravaActivities"];
 
-async function pushAccountsToSupabase(accounts) {
-  if (!sb) return;
-  const rows = Object.entries(accounts).map(([email, data]) => ({ email, data }));
-  if (!rows.length) return;
+// { [email]: { id, role, profile } } — cache en memoria, se pierde al recargar la página
+// (a propósito: no queremos datos de salud de un atleta persistidos en el disco de un
+// dispositivo compartido). Se rehidrata desde Supabase al iniciar sesión o al sincronizar.
+let accountsCache = {};
+let lastPushedSnapshot = {};
+
+function loadAccounts() {
+  return accountsCache;
+}
+
+// Guarda el cache local al instante (para que la UI responda ya) y empuja a Supabase,
+// en segundo plano, solo las filas que realmente cambiaron desde el último push — evita
+// reescribir filas ajenas que el usuario actual ni siquiera tiene permiso de tocar.
+function saveAccounts(accounts) {
+  accountsCache = accounts;
+  if (sb) {
+    Object.entries(accounts).forEach(([email, acc]) => {
+      if (!acc || !acc.id) return; // fila que todavía no se sincronizó desde el servidor
+      const prevJson = JSON.stringify(lastPushedSnapshot[email] || null);
+      const nextJson = JSON.stringify(acc);
+      if (prevJson === nextJson) return;
+      pushProfileToSupabase(acc.id, acc.profile);
+    });
+  }
+  lastPushedSnapshot = JSON.parse(JSON.stringify(accounts));
+}
+
+async function pushProfileToSupabase(id, profile) {
   try {
-    const { error } = await sb.from("accounts").upsert(rows);
+    const { error } = await sb.from("profiles").update({ data: profile, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) console.warn("Supabase: no se pudo guardar", error.message);
   } catch (e) {
     console.warn("Supabase: error de red al guardar", e);
@@ -74,32 +99,35 @@ async function pushAccountsToSupabase(accounts) {
 async function pullAccountsFromSupabase() {
   if (!sb) return;
   try {
-    const { data, error } = await sb.from("accounts").select("email,data");
+    const { data, error } = await sb.from("profiles").select("id,email,role,data");
     if (error || !data) {
       if (error) console.warn("Supabase: no se pudo sincronizar", error.message);
       return;
     }
-    const local = loadAccounts();
+    const next = { ...accountsCache };
     let changed = false;
     for (const row of data) {
-      const remote = row.data;
       const isMe = row.email === state.currentEmail;
-      if (isMe && state.role === "athlete" && state.profile && remote && remote.profile) {
+      if (isMe && state.role === "athlete" && state.profile && row.data) {
         COACH_WRITABLE_PROFILE_FIELDS.forEach((f) => {
-          if (JSON.stringify(state.profile[f]) !== JSON.stringify(remote.profile[f])) {
-            state.profile[f] = remote.profile[f];
+          if (JSON.stringify(state.profile[f]) !== JSON.stringify(row.data[f])) {
+            state.profile[f] = row.data[f];
             changed = true;
           }
         });
-        if (local[row.email]) local[row.email].profile = state.profile;
-      } else if (!isMe) {
-        if (JSON.stringify(local[row.email]) !== JSON.stringify(remote)) {
-          local[row.email] = remote;
+        next[row.email] = { id: row.id, role: row.role, profile: state.profile };
+      } else {
+        const incoming = { id: row.id, role: row.role, profile: row.data };
+        if (JSON.stringify(next[row.email]) !== JSON.stringify(incoming)) {
+          next[row.email] = incoming;
           changed = true;
         }
       }
     }
-    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(local));
+    accountsCache = next;
+    // lo que acabamos de traer del servidor no hay que volver a empujarlo como si fuera
+    // un cambio local — si no, cada pull generaría un push inmediato de ida y vuelta.
+    lastPushedSnapshot = JSON.parse(JSON.stringify(next));
     if (changed) render();
   } catch (e) {
     console.warn("Supabase: error de red al sincronizar", e);
@@ -117,21 +145,6 @@ const PLAN_TYPE_OPTIONS = [
   ["long", "Fondo largo"],
   ["caco", "CACO (caminar-correr)"],
 ];
-
-function loadAccounts() {
-  return JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || "{}");
-}
-function saveAccounts(accounts) {
-  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
-  pushAccountsToSupabase(accounts);
-}
-function ensureCoachAccount() {
-  const accounts = loadAccounts();
-  if (!accounts[COACH_EMAIL]) {
-    accounts[COACH_EMAIL] = { password: COACH_PASSWORD, role: "coach", profile: null };
-    saveAccounts(accounts);
-  }
-}
 
 function defaultProfileState() {
   return {
@@ -187,9 +200,10 @@ let state = {
   signupEmail: "",
   signupPassword: "",
   loginError: "",
-  recoverStep: "email", // email | reset | done
+  loginLoading: false,
+  confirmEmailNotice: false,
+  recoverStep: "email", // email | sent | setNewPassword | done
   recoverEmail: "",
-  recoverFoundEmail: "",
   recoverPassword1: "",
   recoverPassword2: "",
   recoverError: "",
@@ -463,20 +477,10 @@ function renderAuth() {
     <div class="auth-card">
       <div class="auth-logo">${ICONS.logo}<div>TEMPRUN</div></div>
       <div class="auth-title">${isSignup ? "Creá tu cuenta" : "Ingresá a tu cuenta"}</div>
-      <div class="auth-subtitle">${isSignup ? "Sumate al club y empezá tu plan." : "Usá tu email y contraseña, o entrá con Google / Apple."}</div>
-
-      <button class="social-btn" data-action="loginWithGoogle">
-        <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.4 29.3 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34.5 5 29.5 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.2-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C34.5 7 29.5 5 24 5c-7.8 0-14.4 4.5-17.7 9.7z"/><path fill="#4CAF50" d="M24 43c5.3 0 10.1-2 13.7-5.4l-6.3-5.3C29.4 34 26.8 35 24 35c-5.3 0-9.7-3.6-11.3-8.4l-6.5 5C9.5 38.5 16.2 43 24 43z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.4-2.3 4.4-4.3 5.9l6.3 5.3C40.9 36.6 43 30.9 43 24c0-1.2-.1-2.4-.4-3.5z"/></svg>
-        Continuar con Google
-      </button>
-      <button class="social-btn apple" data-action="loginWithApple">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="#fff"><path d="M16.365 1.43c0 1.14-.417 2.06-1.25 2.86-.86.82-1.9 1.29-2.99 1.2-.12-1.1.42-2.24 1.24-3.02.85-.82 2-1.34 3-1.4v.36zM20.6 17.5c-.55 1.27-.82 1.84-1.53 2.97-1 1.58-2.4 3.54-4.14 3.55-1.54.02-1.94-1-4.03-1-2.1 0-2.54 1-4.06 1.02-1.72.02-3.03-1.7-4.03-3.27C.83 17.4.05 13.28 1.5 10.5c.72-1.38 2-2.25 3.4-2.27 1.5-.03 2.4 1.02 4.02 1.02 1.6 0 2.4-1.02 4.1-.98.7.03 2.65.28 3.9 2.13-.1.06-2.33 1.36-2.3 4.05.03 3.22 2.83 4.28 2.98 4.55z"/></svg>
-        Continuar con Apple
-      </button>
-
-      <div class="divider-row"><div class="line"></div><span>O CON TU CUENTA</span><div class="line"></div></div>
+      <div class="auth-subtitle">${isSignup ? "Sumate al club y empezá tu plan." : "Usá tu email y contraseña para ingresar."}</div>
 
       ${state.loginError ? `<div class="auth-error">${state.loginError}</div>` : ""}
+      ${state.confirmEmailNotice ? `<div style="font-size:12px;color:var(--good);margin-bottom:14px;">Te enviamos un email para confirmar tu cuenta. Confirmalo y después iniciá sesión acá.</div>` : ""}
 
       ${
         isSignup
@@ -484,14 +488,14 @@ function renderAuth() {
         <input class="field-input" type="text" placeholder="Nombre completo" data-bind="signupName" value="${esc(state.signupName)}">
         <input class="field-input" type="email" placeholder="Email" data-bind="signupEmail" value="${esc(state.signupEmail)}">
         <input class="field-input" type="password" placeholder="Contraseña (mínimo 4 caracteres)" data-bind="signupPassword" value="${esc(state.signupPassword)}">
-        <button class="btn-accent" data-action="doSignup">Crear cuenta</button>
+        <button class="btn-accent" data-action="doSignup" ${state.loginLoading ? "disabled" : ""}>${state.loginLoading ? "Creando cuenta..." : "Crear cuenta"}</button>
         <button class="btn-outline-block" data-action="goSignin">Ya tengo cuenta</button>
       `
           : `
         <input class="field-input" type="email" placeholder="Email" data-bind="loginEmail" value="${esc(state.loginEmail)}">
         <input class="field-input" type="password" placeholder="Contraseña" data-bind="loginPassword" value="${esc(state.loginPassword)}">
         <div class="forgot-row"><button class="link-btn" data-action="goRecover">¿Olvidaste tu contraseña?</button></div>
-        <button class="btn-accent" data-action="doLogin">Ingresar</button>
+        <button class="btn-accent" data-action="doLogin" ${state.loginLoading ? "disabled" : ""}>${state.loginLoading ? "Ingresando..." : "Ingresar"}</button>
         <button class="btn-outline-block" data-action="goSignup">Crear cuenta</button>
       `
       }
@@ -504,18 +508,24 @@ function renderRecover() {
   if (state.recoverStep === "email") {
     body = `
       <div class="auth-title">Recuperar contraseña</div>
-      <div class="auth-subtitle">Ingresá el email de tu cuenta para restablecer la contraseña.</div>
+      <div class="auth-subtitle">Ingresá el email de tu cuenta y te mandamos un link para restablecer la contraseña.</div>
       ${state.recoverError ? `<div class="auth-error">${state.recoverError}</div>` : ""}
       <input class="field-input" type="email" placeholder="Email" data-bind="recoverEmail" value="${esc(state.recoverEmail)}">
-      <button class="btn-accent" data-action="checkRecoverEmail">Continuar</button>`;
-  } else if (state.recoverStep === "reset") {
+      <button class="btn-accent" data-action="checkRecoverEmail" ${state.loginLoading ? "disabled" : ""}>${state.loginLoading ? "Enviando..." : "Enviar link"}</button>`;
+  } else if (state.recoverStep === "sent") {
+    body = `
+      <div style="width:52px;height:52px;border-radius:50%;background:color-mix(in oklch, var(--good) 18%, transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M20 6 9 17l-5-5" fill="none" stroke="var(--good)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="auth-title">Revisá tu email</div>
+      <div class="auth-subtitle">Te mandamos un link a <strong style="color:var(--text)">${esc(state.recoverEmail)}</strong> para elegir una nueva contraseña.</div>`;
+  } else if (state.recoverStep === "setNewPassword") {
     body = `
       <div class="auth-title">Elegí una nueva contraseña</div>
-      <div class="auth-subtitle">Cuenta: <strong style="color:var(--text)">${esc(state.recoverFoundEmail)}</strong></div>
       ${state.recoverError ? `<div class="auth-error">${state.recoverError}</div>` : ""}
       <input class="field-input" type="password" placeholder="Nueva contraseña (mínimo 4 caracteres)" data-bind="recoverPassword1" value="${esc(state.recoverPassword1)}">
       <input class="field-input" type="password" placeholder="Repetir contraseña" data-bind="recoverPassword2" value="${esc(state.recoverPassword2)}">
-      <button class="btn-accent" data-action="submitReset">Guardar nueva contraseña</button>`;
+      <button class="btn-accent" data-action="submitReset" ${state.loginLoading ? "disabled" : ""}>${state.loginLoading ? "Guardando..." : "Guardar nueva contraseña"}</button>`;
   } else {
     body = `
       <div style="width:52px;height:52px;border-radius:50%;background:color-mix(in oklch, var(--good) 18%, transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
@@ -529,7 +539,7 @@ function renderRecover() {
     <div class="auth-card">
       <div class="auth-logo">${ICONS.logo}<div>TEMPRUN</div></div>
       ${body}
-      <button class="link-btn" data-action="backToLogin">‹ Volver a ingresar</button>
+      ${state.recoverStep !== "setNewPassword" ? `<button class="link-btn" data-action="backToLogin">‹ Volver a ingresar</button>` : ""}
     </div>
   </div>`;
 }
@@ -2536,23 +2546,29 @@ root.addEventListener("click", (e) => {
 });
 
 const ACTIONS = {
-  loginWithGoogle: () => quickSocialLogin("Juan Pérez", "google-user@temprun.demo"),
-  loginWithApple: () => quickSocialLogin("Juan Pérez", "apple-user@temprun.demo"),
   goSignup: () => setState({ loginScreen: "signup", loginError: "" }),
   goSignin: () => setState({ loginScreen: "signin", loginError: "" }),
   goRecover: () =>
     setState({ loginScreen: "recover", recoverStep: "email", recoverEmail: state.loginEmail, recoverError: "", recoverPassword1: "", recoverPassword2: "" }),
   backToLogin: () => setState({ loginScreen: "signin" }),
-  checkRecoverEmail: () => {
+  checkRecoverEmail: async () => {
     const email = state.recoverEmail.trim().toLowerCase();
-    const accounts = loadAccounts();
-    if (!email || !accounts[email]) {
-      setState({ recoverError: "No existe ninguna cuenta con ese email." });
+    if (!email) {
+      setState({ recoverError: "Ingresá tu email." });
       return;
     }
-    setState({ recoverStep: "reset", recoverFoundEmail: email, recoverError: "" });
+    if (!sb) {
+      setState({ recoverError: "No se pudo conectar con el servidor. Probá de nuevo en un momento." });
+      return;
+    }
+    setState({ recoverError: "", loginLoading: true });
+    // por seguridad no confirmamos si el email existe o no — siempre mostramos el mismo
+    // mensaje de éxito, así nadie puede usar este formulario para descubrir qué emails
+    // están registrados en el club.
+    await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.href.split("#")[0] });
+    setState({ recoverStep: "sent", loginLoading: false });
   },
-  submitReset: () => {
+  submitReset: async () => {
     if (state.recoverPassword1.length < 4) {
       setState({ recoverError: "La contraseña debe tener al menos 4 caracteres." });
       return;
@@ -2561,49 +2577,91 @@ const ACTIONS = {
       setState({ recoverError: "Las contraseñas no coinciden." });
       return;
     }
-    const accounts = loadAccounts();
-    const acc = accounts[state.recoverFoundEmail];
-    if (!acc) {
-      setState({ recoverError: "No existe ninguna cuenta con ese email." });
+    if (!sb) {
+      setState({ recoverError: "No se pudo conectar con el servidor." });
       return;
     }
-    acc.password = state.recoverPassword1;
-    saveAccounts(accounts);
-    setState({ recoverStep: "done", recoverError: "" });
+    setState({ recoverError: "", loginLoading: true });
+    const { error } = await sb.auth.updateUser({ password: state.recoverPassword1 });
+    if (error) {
+      setState({ recoverError: "No se pudo actualizar la contraseña. Pedí un nuevo link e intentá de nuevo.", loginLoading: false });
+      return;
+    }
+    await sb.auth.signOut();
+    setState({ recoverStep: "done", recoverError: "", loginLoading: false });
   },
-  doLogin: () => {
+  doLogin: async () => {
     const email = state.loginEmail.trim().toLowerCase();
-    const accounts = loadAccounts();
     if (!email || !state.loginPassword) {
       setState({ loginError: "Completá email y contraseña." });
       return;
     }
-    const acc = accounts[email];
-    if (!acc || acc.password !== state.loginPassword) {
-      setState({ loginError: "Email o contraseña incorrectos." });
+    if (!sb) {
+      setState({ loginError: "No se pudo conectar con el servidor. Probá de nuevo en un momento." });
       return;
     }
+    setState({ loginError: "", loginLoading: true });
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: state.loginPassword });
+    if (error || !data.user) {
+      setState({ loginError: "Email o contraseña incorrectos.", loginLoading: false });
+      return;
+    }
+    const { data: profileRow, error: profileError } = await sb.from("profiles").select("id,email,role,data").eq("id", data.user.id).single();
+    if (profileError || !profileRow) {
+      setState({ loginError: "No se pudo cargar tu cuenta. Probá de nuevo.", loginLoading: false });
+      return;
+    }
+    const acc = { id: profileRow.id, role: profileRow.role, profile: profileRow.data };
+    accountsCache = { ...accountsCache, [email]: acc };
+    lastPushedSnapshot[email] = JSON.parse(JSON.stringify(acc));
+    setState({ loginLoading: false });
     enterAccount(email, acc);
   },
-  doSignup: () => {
+  doSignup: async () => {
     const email = state.signupEmail.trim().toLowerCase();
     if (!state.signupName.trim() || !email || state.signupPassword.length < 4) {
       setState({ loginError: "Completá nombre, email y una contraseña de al menos 4 caracteres." });
       return;
     }
-    const accounts = loadAccounts();
-    if (accounts[email]) {
-      setState({ loginError: "Ya existe una cuenta con ese email." });
+    if (!sb) {
+      setState({ loginError: "No se pudo conectar con el servidor. Probá de nuevo en un momento." });
+      return;
+    }
+    setState({ loginError: "", loginLoading: true, confirmEmailNotice: false });
+    const { data, error } = await sb.auth.signUp({ email, password: state.signupPassword });
+    if (error) {
+      setState({ loginError: /already|existe/i.test(error.message) ? "Ya existe una cuenta con ese email." : "No se pudo crear la cuenta: " + error.message, loginLoading: false });
+      return;
+    }
+    if (!data.user) {
+      setState({ loginError: "No se pudo crear la cuenta.", loginLoading: false });
       return;
     }
     const profile = defaultProfileState();
     profile.fullName = state.signupName.trim();
-    const acc = { password: state.signupPassword, role: "athlete", profile };
-    accounts[email] = acc;
-    saveAccounts(accounts);
+    // el rol lo decide el trigger del servidor según el email (ver supabase-setup.sql),
+    // por eso re-leemos la fila insertada en vez de asumir "athlete" acá: si este email es
+    // el del coach, el trigger ya la corrigió a "coach" antes de que llegue esta respuesta.
+    const { data: insertedRows, error: insertError } = await sb.from("profiles").insert({ id: data.user.id, email, role: "athlete", data: profile }).select();
+    if (insertError || !insertedRows || !insertedRows[0]) {
+      setState({ loginError: "No se pudo crear tu perfil: " + (insertError ? insertError.message : ""), loginLoading: false });
+      return;
+    }
+    const acc = { id: data.user.id, role: insertedRows[0].role, profile };
+    accountsCache = { ...accountsCache, [email]: acc };
+    lastPushedSnapshot[email] = JSON.parse(JSON.stringify(acc));
+    if (!data.session) {
+      // el proyecto tiene confirmación de email activada: todavía no hay sesión.
+      setState({ loginScreen: "signin", loginError: "", loginLoading: false, confirmEmailNotice: true, loginEmail: email, signupEmail: "", signupName: "", signupPassword: "" });
+      return;
+    }
+    setState({ loginLoading: false });
     enterAccount(email, acc);
   },
   logout: () => {
+    if (sb) sb.auth.signOut();
+    accountsCache = {};
+    lastPushedSnapshot = {};
     setState({
       screen: "login",
       loginScreen: "signin",
@@ -2618,7 +2676,6 @@ const ACTIONS = {
       coachView: "roster",
       selectedAthleteEmail: null,
     });
-    localStorage.removeItem(SESSION_KEY);
   },
   obNext: () => {
     const s = state.profile;
@@ -2923,21 +2980,10 @@ function getByPath(obj, path) {
   return path.split(".").reduce((cur, key) => (cur == null ? cur : cur[key]), obj);
 }
 
-function quickSocialLogin(name, email) {
-  const accounts = loadAccounts();
-  let acc = accounts[email];
-  if (!acc) {
-    const profile = defaultProfileState();
-    profile.fullName = name;
-    acc = { password: null, role: "athlete", profile };
-    accounts[email] = acc;
-    saveAccounts(accounts);
-  }
-  enterAccount(email, acc);
-}
-
 function enterAccount(email, acc) {
-  localStorage.setItem(SESSION_KEY, email);
+  // sincroniza al toque (no esperar los 8s del intervalo) — clave para el coach, que si
+  // no ve el roster vacío hasta el primer ciclo de sync.
+  pullAccountsFromSupabase();
   if (acc.role === "coach") {
     setState({
       screen: "app",
@@ -3025,14 +3071,28 @@ setProfile = function (patch) {
 
 /* ---------------- INIT ---------------- */
 
-(function init() {
-  ensureCoachAccount();
-  const savedEmail = localStorage.getItem(SESSION_KEY);
-  if (savedEmail) {
-    const accounts = loadAccounts();
-    const acc = accounts[savedEmail];
-    if (acc) {
-      state.currentEmail = savedEmail;
+(async function init() {
+  if (!sb) {
+    render();
+    return;
+  }
+  // el link de "recuperar contraseña" del email trae al usuario de vuelta acá con un
+  // token en la URL — el cliente de Supabase lo detecta solo y dispara este evento.
+  sb.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY") {
+      setState({ screen: "login", loginScreen: "recover", recoverStep: "setNewPassword", recoverError: "" });
+    }
+  });
+  const {
+    data: { session },
+  } = await sb.auth.getSession();
+  if (session && session.user) {
+    const { data: profileRow } = await sb.from("profiles").select("id,email,role,data").eq("id", session.user.id).single();
+    if (profileRow) {
+      const acc = { id: profileRow.id, role: profileRow.role, profile: profileRow.data };
+      accountsCache[profileRow.email] = acc;
+      lastPushedSnapshot[profileRow.email] = JSON.parse(JSON.stringify(acc));
+      state.currentEmail = profileRow.email;
       if (acc.role === "coach") {
         state.role = "coach";
         state.screen = "app";
@@ -3045,8 +3105,6 @@ setProfile = function (patch) {
     }
   }
   render();
-  if (sb) {
-    pullAccountsFromSupabase();
-    setInterval(pullAccountsFromSupabase, SUPABASE_SYNC_INTERVAL_MS);
-  }
+  pullAccountsFromSupabase();
+  setInterval(pullAccountsFromSupabase, SUPABASE_SYNC_INTERVAL_MS);
 })();
