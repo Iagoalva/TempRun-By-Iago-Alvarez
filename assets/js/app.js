@@ -73,18 +73,33 @@ function loadAccounts() {
 // Guarda el cache local al instante (para que la UI responda ya) y empuja a Supabase,
 // en segundo plano, solo las filas que realmente cambiaron desde el último push — evita
 // reescribir filas ajenas que el usuario actual ni siquiera tiene permiso de tocar.
+// para cada email, la última versión (serializada) que se le mandó a pushProfileToSupabase
+// pero todavía no confirmó — mientras esté "en vuelo", un pull no debe pisar el cache local
+// con lo que trae del servidor (podría ser el valor viejo si el pull ganó la carrera).
+let pendingPushJson = {};
+
 function saveAccounts(accounts) {
   accountsCache = accounts;
-  if (sb) {
-    Object.entries(accounts).forEach(([email, acc]) => {
-      if (!acc || !acc.id) return; // fila que todavía no se sincronizó desde el servidor
-      const prevJson = JSON.stringify(lastPushedSnapshot[email] || null);
-      const nextJson = JSON.stringify(acc);
-      if (prevJson === nextJson) return;
-      pushProfileToSupabase(acc.id, acc.profile);
-    });
+  if (!sb) {
+    lastPushedSnapshot = JSON.parse(JSON.stringify(accounts));
+    return;
   }
-  lastPushedSnapshot = JSON.parse(JSON.stringify(accounts));
+  Object.entries(accounts).forEach(([email, acc]) => {
+    if (!acc || !acc.id) return; // fila que todavía no se sincronizó desde el servidor
+    const prevJson = JSON.stringify(lastPushedSnapshot[email] || null);
+    const nextJson = JSON.stringify(acc);
+    if (prevJson === nextJson) return;
+    pendingPushJson[email] = nextJson;
+    pushProfileToSupabase(acc.id, acc.profile).then(() => {
+      // solo se confirma como "guardado" si sigue siendo la última versión en vuelo para
+      // este email — si mientras tanto se tipeó algo más nuevo, esperamos a que ESE push
+      // termine (evita marcar como confirmado un valor que ya quedó viejo).
+      if (pendingPushJson[email] === nextJson) {
+        lastPushedSnapshot[email] = JSON.parse(nextJson);
+        delete pendingPushJson[email];
+      }
+    });
+  });
 }
 
 async function pushProfileToSupabase(id, profile) {
@@ -105,9 +120,18 @@ async function pullAccountsFromSupabase() {
       return;
     }
     const next = { ...accountsCache };
+    const processedEmails = [];
     let changed = false;
     for (const row of data) {
       const isMe = row.email === state.currentEmail;
+      // si el cache local de esta cuenta todavía no coincide con lo último que se empujó
+      // a Supabase, hay una edición local pendiente (o en vuelo) sin confirmar todavía —
+      // no la pisamos con lo que acaba de llegar del servidor, que puede ser el valor
+      // viejo si el pull ganó la carrera contra el push. Se reconcilia en un pull futuro,
+      // una vez que ese push haya terminado.
+      const hasPendingLocalEdit = next[row.email] && JSON.stringify(next[row.email]) !== JSON.stringify(lastPushedSnapshot[row.email] || null);
+      if (hasPendingLocalEdit && !isMe) continue;
+      processedEmails.push(row.email);
       if (isMe && state.role === "athlete" && state.profile && row.data) {
         COACH_WRITABLE_PROFILE_FIELDS.forEach((f) => {
           if (JSON.stringify(state.profile[f]) !== JSON.stringify(row.data[f])) {
@@ -125,9 +149,12 @@ async function pullAccountsFromSupabase() {
       }
     }
     accountsCache = next;
-    // lo que acabamos de traer del servidor no hay que volver a empujarlo como si fuera
-    // un cambio local — si no, cada pull generaría un push inmediato de ida y vuelta.
-    lastPushedSnapshot = JSON.parse(JSON.stringify(next));
+    // solo marcamos como "confirmado" lo que realmente procesamos este ciclo — las cuentas
+    // que se saltearon por tener una edición local pendiente conservan su lastPushedSnapshot
+    // tal cual, para que sea saveAccounts() (al confirmarse el push real) quien la actualice.
+    processedEmails.forEach((email) => {
+      lastPushedSnapshot[email] = JSON.parse(JSON.stringify(next[email]));
+    });
     if (changed) render();
   } catch (e) {
     console.warn("Supabase: error de red al sincronizar", e);
