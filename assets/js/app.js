@@ -2171,8 +2171,21 @@ function renderZonaElongacion() {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
         <div style="padding:24px;border-right:1px solid var(--border);position:relative;display:flex;flex-direction:column;align-items:center;">
-          <button class="btn-outline-block" style="width:auto;padding:8px 16px;font-size:11.5px;position:absolute;top:20px;right:20px;display:flex;align-items:center;gap:6px;" data-action="toggleElongacionSide">${ICONS.refresh} ${side === "frente" ? "ESPALDA" : "FRENTE"}</button>
-          <div style="margin-top:36px;">${renderBodySilhouette(side, state.elongacionZone)}</div>
+          <div style="position:absolute;top:20px;right:20px;display:flex;background:var(--surface2);border-radius:8px;padding:3px;gap:2px;">
+            ${[
+              ["frente", "FRENTE"],
+              ["espalda", "ESPALDA"],
+            ]
+              .map(
+                ([val, label]) =>
+                  `<button type="button" data-action="setElongacionSide" data-side="${val}" style="all:unset;cursor:pointer;padding:7px 14px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:0.3px;${
+                    side === val ? "background:var(--pink);color:#fff;" : "color:var(--muted);"
+                  }">${label}</button>`
+              )
+              .join("")}
+          </div>
+          <div style="margin-top:44px;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.4px;">MOSTRANDO: ${side === "frente" ? "FRENTE DEL CUERPO" : "ESPALDA DEL CUERPO"}</div>
+          <div style="margin-top:8px;">${renderBodySilhouette(side, state.elongacionZone)}</div>
         </div>
         <div style="padding:24px;">
           ${renderElongacionInfo(side, state.elongacionZone)}
@@ -3715,7 +3728,7 @@ const ACTIONS = {
   },
   setRutinasSubTab: (el) => setState({ rutinasSubTab: el.dataset.tab }),
   setTecnicaSubTab: (el) => setState({ tecnicaSubTab: el.dataset.tab }),
-  toggleElongacionSide: () => setState((s) => ({ elongacionSide: s.elongacionSide === "frente" ? "espalda" : "frente", elongacionZone: null })),
+  setElongacionSide: (el) => setState((s) => (s.elongacionSide === el.dataset.side ? {} : { elongacionSide: el.dataset.side, elongacionZone: null })),
   selectElongationZone: (el) => setState((s) => ({ elongacionZone: s.elongacionZone === el.dataset.zone ? null : el.dataset.zone })),
   pulseUseResult: () => {
     if (state.pulseResult == null) return;
