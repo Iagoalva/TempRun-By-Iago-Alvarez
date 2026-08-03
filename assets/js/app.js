@@ -419,6 +419,7 @@ let state = {
   theme: "dark",
   dailyRewardResult: null, // monto ganado en esta sesión, solo para el mensaje de feedback
   avatarPreviewDataUrl: null, // foto recién elegida, pendiente de confirmar antes de guardarla
+  showDailyModal: false, // se prende al entrar a la app como atleta (login o sesión restaurada)
   athleteTab: "panel",
   perfilTab: "datos", // datos | carreras | fisiologia | salud | membresia
   rutinasSubTab: "tecnica", // tecnica | elongacion
@@ -428,6 +429,7 @@ let state = {
   weekIndex: 0,
   expandedKey: null,
   selectedDayIdx: null,
+  movingDayIdx: null, // índice del día que el atleta está por mover a otro día de la semana
   chatInput: "",
   profile: defaultProfileState(),
   // coach-only
@@ -1171,15 +1173,44 @@ function computeGamification(profile, currentWeekHint) {
   return { totalCompleted, totalKmCompleted: Math.round(totalKmCompleted * 10) / 10, trainingPoints, bonusPoints, points, tier, tierIdx, nextTier, progressToNext, streakWeeks, badges };
 }
 
-// Ancla la semana 0 del plan a la fecha real en que se compiló, para poder calcular "esta
-// semana" de la misma forma para todos los atletas — sin esto, cada uno podría estar
-// "parado" en una semana distinta de su plan solo por cómo navegó la pantalla, y el ranking
-// semanal no compararía manzanas con manzanas.
+// Ancla la semana 0 del plan al lunes de la semana calendario en que se compiló el plan —
+// así el índice de día (0=Lun...6=Dom, mismo orden que DAY_KEYS en engine.js) coincide con
+// el día real de la semana, y se puede calcular una fecha concreta para cada sesión.
+function mondayOnOrBefore(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const jsDay = d.getDay(); // 0=Dom, 1=Lun, ..., 6=Sáb
+  const diff = jsDay === 0 ? -6 : 1 - jsDay;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+// Para poder calcular "esta semana" de la misma forma para todos los atletas — sin esto,
+// cada uno podría estar "parado" en una semana distinta de su plan solo por cómo navegó la
+// pantalla, y el ranking semanal no compararía manzanas con manzanas.
 function currentWeekIndexFromDate(profile, totalWeeks) {
   if (!profile.planStartDate) return 0;
-  const start = new Date(profile.planStartDate + "T00:00:00");
-  const days = Math.floor((Date.now() - start.getTime()) / 86400000);
+  const monday = mondayOnOrBefore(profile.planStartDate);
+  const days = Math.floor((Date.now() - monday.getTime()) / 86400000);
   return Math.max(0, Math.min(totalWeeks - 1, Math.floor(days / 7)));
+}
+
+function todaysWeekIndex(profile) {
+  return currentWeekIndexFromDate(profile, computeRenderModel(profile, 0).macro.totalWeeks);
+}
+
+// Fecha real de una sesión: lunes de la semana del plan (weekIndex) + dayIdx días (0=Lun).
+function dateForDay(profile, weekIndex, dayIdx) {
+  if (!profile.planStartDate) return null;
+  const monday = mondayOnOrBefore(profile.planStartDate);
+  const d = new Date(monday);
+  d.setDate(d.getDate() + weekIndex * 7 + dayIdx);
+  return d;
+}
+
+function formatDayDateShort(profile, weekIndex, dayIdx) {
+  const d = dateForDay(profile, weekIndex, dayIdx);
+  if (!d) return "";
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function computeWeeklyKm(profile) {
@@ -1322,7 +1353,45 @@ function renderApp() {
           }</button>`
       )
       .join("")}
-  </nav>`;
+  </nav>
+  ${state.showDailyModal ? renderDailyModal(m) : ""}`;
+}
+
+// Ventana que se muestra una vez al entrar a la app (login o volver a abrirla), con el
+// entrenamiento de hoy explicado en criollo — para que no haga falta ir a buscarlo.
+function renderDailyModal(m) {
+  const d = m.todayDay;
+  const isRest = d.isRest;
+  const main = !isRest && d.sessionInfo.blocks ? d.sessionInfo.blocks.find((b) => b.label === "PRINCIPAL") || d.sessionInfo.blocks[0] : null;
+  const dateLabel = formatDayDateShort(state.profile, m.weekIndex, d.i);
+  return `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px;">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:26px;max-width:380px;width:100%;">
+        <div style="font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:0.3px;margin-bottom:14px;">${d.day.toUpperCase()}${dateLabel ? " · " + dateLabel : ""}</div>
+        ${
+          isRest
+            ? `
+          <div style="font-size:34px;margin-bottom:10px;">😌</div>
+          <div style="font-size:18px;font-weight:800;margin-bottom:8px;">Hoy es día de descanso</div>
+          <div style="font-size:13.5px;color:var(--muted);line-height:1.5;margin-bottom:20px;">No hay entrenamiento programado. Aprovechá para recuperar: dormí bien, hidratate, y si querés sumar algo suave mirá la guía de elongación en Rutinas.</div>
+        `
+            : `
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <div style="width:38px;height:38px;border-radius:10px;background:var(--surface2);display:flex;align-items:center;justify-content:center;flex:none;">${sessionIcon(d.sessionInfo.typeTag)}</div>
+            <div>
+              <div style="font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:0.3px;">ENTRENAMIENTO DE HOY</div>
+              <div style="font-size:16px;font-weight:800;">${esc(d.sessionInfo.title)}</div>
+            </div>
+          </div>
+          <div style="font-size:13.5px;color:var(--muted);line-height:1.6;margin-bottom:18px;">
+            <p style="margin:0 0 8px;">${esc(d.dist)} en total${main ? ` · ritmo ${esc(main.pace)}` : ""}.</p>
+            ${main && main.desc ? `<p style="margin:0;">${esc(main.desc)}</p>` : ""}
+          </div>
+        `
+        }
+        <button type="button" class="btn-accent" style="margin:0;" data-action="dismissDailyModal">${isRest ? "Entendido" : "Entendido, vamos 💪"}</button>
+      </div>
+    </div>`;
 }
 
 // Códigos WMO que devuelve Open-Meteo (current_weather.weathercode) — mapeados a un emoji
@@ -1423,6 +1492,7 @@ function renderPanel(m, firstName, avatarLetter) {
           (d, i) => `
         <button class="day-chip" style="border-color:${i === (state.selectedDayIdx ?? m.planDays.findIndex((x) => x.day === m.todayDay.day)) ? "var(--accent)" : "var(--border)"}" data-action="pickDay" data-idx="${i}">
           <div class="d-name">${d.day}</div>
+          <div style="font-size:9px;color:var(--muted);">${formatDayDateShort(state.profile, m.weekIndex, i)}</div>
           <div class="dot" style="background:${d.barColor}"></div>
           <div class="workout" style="opacity:${d.done ? 0.55 : 1}">${d.isRest ? "Descanso" : d.workout}</div>
           <div class="done-mark">${d.done ? "✓" : ""}</div>
@@ -1502,6 +1572,21 @@ function renderBlocksGrid(sessionInfo, editDayIdx) {
     </div>`;
 }
 
+// Control para mover una sesión a otro día de la misma semana (ej: no pudiste entrenar el
+// martes pero sí el miércoles). Sin "movingDayIdx" muestra el ícono para arrancar el
+// movimiento; con uno activo, el propio día de origen muestra "Cancelar" y los demás
+// muestran "Mover acá".
+function renderMoveControl(d) {
+  const moving = state.movingDayIdx;
+  if (moving == null) {
+    return `<button type="button" title="Mover esta sesión a otro día" style="all:unset;cursor:pointer;color:var(--muted);flex:none;display:flex;" data-action="startMoveDay" data-idx="${d.i}">${ICONS.refresh}</button>`;
+  }
+  if (moving === d.i) {
+    return `<button type="button" style="all:unset;cursor:pointer;font-size:10.5px;font-weight:700;color:var(--bad);flex:none;white-space:nowrap;" data-action="cancelMoveDay">Cancelar</button>`;
+  }
+  return `<button type="button" style="all:unset;cursor:pointer;font-size:10.5px;font-weight:800;color:var(--accent);background:color-mix(in oklch, var(--accent) 16%, transparent);padding:6px 10px;border-radius:6px;flex:none;white-space:nowrap;" data-action="moveDaySwap" data-idx="${d.i}">Mover acá</button>`;
+}
+
 function renderPlan(m) {
   return `
     <div class="plan-header">
@@ -1527,19 +1612,21 @@ function renderPlan(m) {
     <div class="week-days">
       ${m.planDays
         .map((d) => {
+          const dateLabel = formatDayDateShort(state.profile, m.weekIndex, d.i);
           if (d.isRest) {
             return `
-            <div class="week-day-card">
+            <div class="week-day-card" style="${state.movingDayIdx === d.i ? "outline:2px solid var(--accent);" : ""}">
               <div class="rest-row">
                 <div class="bar" style="background:${d.barColor}"></div>
-                <div class="day-name">${d.day}</div>
+                <div class="day-name">${d.day}${dateLabel ? `<div style="font-size:9.5px;font-weight:600;color:var(--muted);">${dateLabel}</div>` : ""}</div>
                 <div class="desc">Descanso</div>
+                ${renderMoveControl(d)}
                 <button class="done-circle" style="border-color:${d.done ? "var(--good)" : "var(--border)"}" data-action="toggleDone" data-key="${d.key}">${d.done ? "✓" : ""}</button>
               </div>
             </div>`;
           }
           return `
-            <div class="week-day-card">
+            <div class="week-day-card" style="${state.movingDayIdx === d.i ? "outline:2px solid var(--accent);" : ""}">
               <div class="session-row" data-action="toggleExpand" data-key="${d.key}">
                 <div class="session-row-left">
                   <div class="today-icon">${sessionIcon(d.sessionInfo.typeTag)}</div>
@@ -1548,10 +1635,11 @@ function renderPlan(m) {
                       <span class="tag-solid">${d.sessionInfo.phaseTag}</span>
                       <span class="tag-outline">${d.sessionInfo.typeTag}</span>
                     </div>
-                    <div class="today-title">${d.day} · ${d.sessionInfo.title}</div>
+                    <div class="today-title">${d.day}${dateLabel ? ` (${dateLabel})` : ""} · ${d.sessionInfo.title}</div>
                   </div>
                 </div>
                 <div class="session-row-actions">
+                  ${renderMoveControl(d)}
                   <span class="expand-label">${d.expanded ? "OCULTAR DETALLES ▴" : "VER DETALLES ▾"}</span>
                   <button class="done-btn" style="background:${d.done ? "color-mix(in oklch, var(--good) 20%, transparent)" : "var(--surface2)"};color:${d.done ? "var(--good)" : "var(--text)"}" data-action="toggleDoneStop" data-key="${d.key}">${d.done ? "COMPLETADO ✓" : "MARCAR COMPLETADO"}</button>
                 </div>
@@ -3154,7 +3242,10 @@ function renderCoachDetail() {
             (d) => `
           <div class="week-day-card">
             <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;flex-wrap:wrap;">
-              <div style="width:38px;font-size:12px;font-weight:700;color:var(--muted);flex:none;">${d.day}</div>
+              <div style="width:44px;flex:none;">
+                <div style="font-size:12px;font-weight:700;color:var(--muted);">${d.day}</div>
+                <div style="font-size:9.5px;color:var(--muted);opacity:0.75;">${formatDayDateShort(profile, weekIndex, d.i)}</div>
+              </div>
               <select data-action="coachSetDayType" data-idx="${d.i}" data-km="${d.kmDisplay}" style="flex:1;min-width:150px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12.5px;font-weight:600;">
                 ${PLAN_TYPE_OPTIONS.map(([v, l]) => `<option value="${v}" ${d.typeKey === v ? "selected" : ""}>${l}</option>`).join("")}
               </select>
@@ -3372,6 +3463,25 @@ function bindDynamicListeners() {
     const sel = list.querySelector(".num-cell.selected");
     (sel || list.firstElementChild)?.scrollIntoView({ block: "center" });
   });
+}
+
+// Captura el contenido efectivo de un día del plan (ya sea algorítmico o ya sobreescrito)
+// en la misma forma que usa dayOverrides — necesario para "mover" una sesión a otro día:
+// no alcanza con mover el override crudo, porque un día sin override todavía no tiene nada
+// guardado (su contenido sale del algoritmo en cada render).
+function materializeDayOverride(d) {
+  return {
+    type: d.type,
+    workout: d.workout,
+    dist: d.dist,
+    km: d.km,
+    warmupMinOverride: d.warmupMinOverride,
+    cooldownMinOverride: d.cooldownMinOverride,
+    isCaco: d.isCaco || false,
+    cacoRunMin: d.cacoRunMin,
+    cacoWalkMin: d.cacoWalkMin,
+    cacoReps: d.cacoReps,
+  };
 }
 
 function coachSetDay(idx, typeKey, km) {
@@ -3715,6 +3825,7 @@ const ACTIONS = {
     setState({ avatarPreviewDataUrl: null });
   },
   avatarCancelPreview: () => setState({ avatarPreviewDataUrl: null }),
+  dismissDailyModal: () => setState({ showDailyModal: false }),
   setAvatarHair: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, hair: el.dataset.val } })),
   setAvatarHairColor: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, hairColor: el.dataset.val } })),
   setAvatarSkin: (el) => setProfile((p) => ({ avatarBuilder: { ...DEFAULT_AVATAR_BUILDER, ...p.avatarBuilder, skinTone: el.dataset.val } })),
@@ -3752,6 +3863,32 @@ const ACTIONS = {
   weekPrev: () => setState((s) => ({ weekIndex: Math.max(0, s.weekIndex - 1), expandedKey: null, selectedDayIdx: null })),
   weekNext: () => setState((s) => ({ weekIndex: clampWeekIndex(state.profile, s.weekIndex + 1), expandedKey: null, selectedDayIdx: null })),
   jumpWeek: (el) => setState({ weekIndex: clampWeekIndex(state.profile, parseInt(el.dataset.idx, 10)), expandedKey: null }),
+  startMoveDay: (el) => setState({ movingDayIdx: parseInt(el.dataset.idx, 10) }),
+  cancelMoveDay: () => setState({ movingDayIdx: null }),
+  moveDaySwap: (el) => {
+    const targetIdx = parseInt(el.dataset.idx, 10);
+    const sourceIdx = state.movingDayIdx;
+    if (sourceIdx == null || sourceIdx === targetIdx) {
+      setState({ movingDayIdx: null });
+      return;
+    }
+    const m = computeRenderModel(state.profile, state.weekIndex);
+    const dayA = m.planDays[sourceIdx];
+    const dayB = m.planDays[targetIdx];
+    if (!dayA || !dayB) {
+      setState({ movingDayIdx: null });
+      return;
+    }
+    const keyA = state.weekIndex + "-" + sourceIdx;
+    const keyB = state.weekIndex + "-" + targetIdx;
+    const doneA = !!state.profile.completed[keyA];
+    const doneB = !!state.profile.completed[keyB];
+    setProfile((p) => ({
+      dayOverrides: { ...p.dayOverrides, [keyA]: materializeDayOverride(dayB), [keyB]: materializeDayOverride(dayA) },
+      completed: { ...p.completed, [keyA]: doneB, [keyB]: doneA },
+    }));
+    setState({ movingDayIdx: null, expandedKey: null });
+  },
   resetPlanProgress: () => {
     if (!confirm("¿Reiniciar el progreso del plan actual? Se borrarán los entrenamientos marcados como completados y las sincronizaciones de Strava, pero mantenés el mismo objetivo y nivel.")) return;
     setProfile({ completed: {}, dayOverrides: {}, stravaActivities: {} });
@@ -4005,7 +4142,7 @@ function enterAccount(email, acc) {
   }
   const profile = acc.profile;
   if (profile.onboardingDone) {
-    setState({ screen: "app", role: "athlete", currentEmail: email, profile, athleteTab: "panel", weekIndex: 0, loginError: "" });
+    setState({ screen: "app", role: "athlete", currentEmail: email, profile, athleteTab: "panel", weekIndex: todaysWeekIndex(profile), loginError: "", showDailyModal: true });
     initWeather();
   } else {
     setState({ screen: "onboarding", role: "athlete", currentEmail: email, profile, onboardingStep: 1, loginError: "" });
@@ -4025,7 +4162,7 @@ function compileProgram() {
     // ranking semanal sin depender de qué semana esté navegando cada atleta en su pantalla.
     setProfile({ onboardingDone: true, coachMessage: welcome, planStartDate: new Date().toISOString().slice(0, 10) });
     persistCurrentProfile();
-    setState({ screen: "app", athleteTab: "panel", weekIndex: 0 });
+    setState({ screen: "app", athleteTab: "panel", weekIndex: todaysWeekIndex(state.profile), showDailyModal: true });
     initWeather();
   }, 3100);
 }
@@ -4112,6 +4249,8 @@ setProfile = function (patch) {
         state.role = "athlete";
         state.profile = acc.profile;
         state.screen = acc.profile.onboardingDone ? "app" : "onboarding";
+        state.showDailyModal = acc.profile.onboardingDone;
+        if (acc.profile.onboardingDone) state.weekIndex = todaysWeekIndex(acc.profile);
       }
     }
   }
