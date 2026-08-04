@@ -18,6 +18,7 @@ const ICONS = {
   people: `<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="9" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 20c0-2.2 1-4 3.5-4.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`,
   refresh: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-.8 12.1a2 2 0 0 1-2 1.9H9.8a2 2 0 0 1-2-1.9L7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  dots: `<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>`,
   mountain: `<svg viewBox="0 0 24 24" width="19" height="19"><path d="M3 19 9.5 7l3.2 5.6L15 9l6 10z" fill="var(--accent)" stroke="var(--accent)" stroke-width="1.2" stroke-linejoin="round"/></svg>`,
   trophy: `<svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 4h10v4a5 5 0 0 1-10 0V4z" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M12 13v3M9 20h6M10 20v-2.5h4V20" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`,
   trendUp: `<svg viewBox="0 0 24 24" width="16" height="16" style="flex:none;margin-top:1px;"><path d="M3 17 9.5 10.5 14 15l7-8" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 7h5v5" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
@@ -430,6 +431,7 @@ let state = {
   expandedKey: null,
   selectedDayIdx: null,
   movingDayIdx: null, // índice del día que el atleta está por mover a otro día de la semana
+  planMenuOpen: false,
   chatInput: "",
   profile: defaultProfileState(),
   // coach-only
@@ -1579,7 +1581,7 @@ function renderBlocksGrid(sessionInfo, editDayIdx) {
 function renderMoveControl(d) {
   const moving = state.movingDayIdx;
   if (moving == null) {
-    return `<button type="button" title="Mover esta sesión a otro día" style="all:unset;cursor:pointer;color:var(--muted);flex:none;display:flex;" data-action="startMoveDay" data-idx="${d.i}">${ICONS.refresh}</button>`;
+    return `<button type="button" title="Mover esta sesión a otro día" style="all:unset;cursor:pointer;color:var(--muted);flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:var(--surface);border:1px solid var(--border);" data-action="startMoveDay" data-idx="${d.i}">${ICONS.refresh}</button>`;
   }
   if (moving === d.i) {
     return `<button type="button" style="all:unset;cursor:pointer;font-size:10.5px;font-weight:700;color:var(--bad);flex:none;white-space:nowrap;" data-action="cancelMoveDay">Cancelar</button>`;
@@ -1596,11 +1598,20 @@ function renderPlan(m) {
         ${m.weekMeta.adjustNote ? `<div class="adjust-note">⚠ ${m.weekMeta.adjustNote}</div>` : ""}
       </div>
       <div class="plan-header-actions">
-        <button class="date-nav-btn" title="Reiniciar progreso del plan" data-action="resetPlanProgress">${ICONS.refresh}</button>
-        <button class="date-nav-btn" title="Crear un plan nuevo" data-action="startNewPlan">${ICONS.trash}</button>
         <div class="week-nav">
-          <button data-action="weekPrev">‹</button>
-          <button data-action="weekNext">›</button>
+          <button title="Semana anterior" data-action="weekPrev">‹</button>
+          <button title="Semana siguiente" data-action="weekNext">›</button>
+        </div>
+        <div class="plan-menu-wrap">
+          <button class="date-nav-btn" title="Más opciones" data-action="togglePlanMenu">${ICONS.dots || "⋯"}</button>
+          ${
+            state.planMenuOpen
+              ? `<div class="plan-menu">
+                  <button type="button" data-action="resetPlanProgress">${ICONS.refresh} Reiniciar progreso</button>
+                  <button type="button" data-action="startNewPlan">${ICONS.trash} Crear plan nuevo</button>
+                </div>`
+              : ""
+          }
         </div>
       </div>
     </div>
@@ -1633,9 +1644,9 @@ function renderPlan(m) {
                   <div>
                     <div class="tag-row">
                       <span class="tag-solid">${d.sessionInfo.phaseTag}</span>
-                      <span class="tag-outline">${d.sessionInfo.typeTag}</span>
+                      <span class="day-date-inline">${d.day}${dateLabel ? ` · ${dateLabel}` : ""}</span>
                     </div>
-                    <div class="today-title">${d.day}${dateLabel ? ` (${dateLabel})` : ""} · ${d.sessionInfo.title}</div>
+                    <div class="today-title">${d.sessionInfo.title}</div>
                   </div>
                 </div>
                 <div class="session-row-actions">
@@ -1963,18 +1974,18 @@ function renderProgresoTab(profile, currentWeekHint) {
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:26px;max-width:640px;">
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
-        <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">ENTRENAMIENTOS</div>
-        <div style="font-size:22px;font-weight:800;margin-top:8px;">${g.totalCompleted}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:26px;max-width:640px;">
+      <div style="min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;">
+        <div style="font-size:9.5px;font-weight:700;letter-spacing:0.2px;color:var(--muted);overflow-wrap:break-word;">ENTRENAMIENTOS</div>
+        <div style="font-size:20px;font-weight:800;margin-top:8px;">${g.totalCompleted}</div>
       </div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
-        <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">KM ACUMULADOS</div>
-        <div style="font-size:22px;font-weight:800;margin-top:8px;">${g.totalKmCompleted}</div>
+      <div style="min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;">
+        <div style="font-size:9.5px;font-weight:700;letter-spacing:0.2px;color:var(--muted);overflow-wrap:break-word;">KM ACUMULADOS</div>
+        <div style="font-size:20px;font-weight:800;margin-top:8px;">${g.totalKmCompleted}</div>
       </div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;">
-        <div style="font-size:10.5px;font-weight:700;letter-spacing:0.4px;color:var(--muted);">RACHA</div>
-        <div style="font-size:22px;font-weight:800;margin-top:8px;display:flex;align-items:center;gap:6px;">${g.streakWeeks > 0 ? ICONS.flame : ""} ${g.streakWeeks} sem</div>
+      <div style="min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;">
+        <div style="font-size:9.5px;font-weight:700;letter-spacing:0.2px;color:var(--muted);overflow-wrap:break-word;">RACHA</div>
+        <div style="font-size:20px;font-weight:800;margin-top:8px;display:flex;align-items:center;gap:6px;">${g.streakWeeks > 0 ? ICONS.flame : ""} ${g.streakWeeks} sem</div>
       </div>
     </div>
 
@@ -3889,12 +3900,15 @@ const ACTIONS = {
     }));
     setState({ movingDayIdx: null, expandedKey: null });
   },
+  togglePlanMenu: () => setState((s) => ({ planMenuOpen: !s.planMenuOpen })),
   resetPlanProgress: () => {
+    setState({ planMenuOpen: false });
     if (!confirm("¿Reiniciar el progreso del plan actual? Se borrarán los entrenamientos marcados como completados y las sincronizaciones de Strava, pero mantenés el mismo objetivo y nivel.")) return;
     setProfile({ completed: {}, dayOverrides: {}, stravaActivities: {} });
     setState({ weekIndex: 0, expandedKey: null, selectedDayIdx: null });
   },
   startNewPlan: () => {
+    setState({ planMenuOpen: false });
     if (!confirm("¿Crear un plan nuevo? Vas a volver a definir tu objetivo, marcas personales y nivel. Tu perfil y datos de salud se mantienen.")) return;
     setProfile((p) => ({
       goalName: "",
