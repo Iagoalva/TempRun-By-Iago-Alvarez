@@ -358,6 +358,7 @@ function defaultProfileState() {
     availability: { Lun: true, Mar: false, Mié: true, Jue: false, Vie: true, Sáb: false, Dom: false },
     pbs: { walk: "", p3k: "", p5k: "", p10k: "" },
     completed: {},
+    effortByKey: {}, // { [dayKey]: 0-10, esfuerzo percibido cargado al marcar el dia como completado }
     dayOverrides: {},
     coachMessage: "",
     stravaStatus: "disconnected",
@@ -432,6 +433,8 @@ let state = {
   selectedDayIdx: null,
   movingDayIdx: null, // índice del día que el atleta está por mover a otro día de la semana
   planMenuOpen: false,
+  effortPromptKey: null, // key del día que está pidiendo el esfuerzo percibido tras marcarlo completado
+  effortPromptValue: 5,
   chatInput: "",
   profile: defaultProfileState(),
   // coach-only
@@ -1356,7 +1359,44 @@ function renderApp() {
       )
       .join("")}
   </nav>
-  ${state.showDailyModal ? renderDailyModal(m) : ""}`;
+  ${state.showDailyModal ? renderDailyModal(m) : ""}
+  ${state.effortPromptKey ? renderEffortModal() : ""}`;
+}
+
+const EFFORT_LABELS = [
+  [0, "Muy fácil"],
+  [2, "Fácil"],
+  [4, "Moderado"],
+  [6, "Algo duro"],
+  [8, "Duro"],
+  [10, "Esfuerzo máximo"],
+];
+function effortLabelFor(v) {
+  let label = EFFORT_LABELS[0][1];
+  for (const [min, l] of EFFORT_LABELS) if (v >= min) label = l;
+  return label;
+}
+
+// Popup de esfuerzo percibido (RPE) tras marcar un entrenamiento como completado —
+// misma idea que el selector de Strava, adaptado a una escala 0-10 con etiquetas.
+function renderEffortModal() {
+  const v = state.effortPromptValue;
+  return `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:310;padding:20px;">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:26px;max-width:380px;width:100%;">
+        <div style="font-size:18px;font-weight:800;margin-bottom:4px;">¿Cómo sentiste el entrenamiento?</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:22px;">Esfuerzo percibido — nos ayuda a ajustar tu plan.</div>
+        <div class="effort-modal-label" style="text-align:center;font-size:15px;font-weight:800;color:var(--accent);margin-bottom:10px;">${effortLabelFor(v)}</div>
+        <input type="range" min="0" max="10" step="1" value="${v}" data-bind="effortPromptValue" style="width:100%;accent-color:var(--accent);">
+        <div style="display:flex;justify-content:space-between;font-size:10.5px;font-weight:700;color:var(--muted);margin-top:6px;margin-bottom:24px;">
+          <span>Fácil</span><span>Moderado</span><span>Esfuerzo máx.</span>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button type="button" style="flex:1;all:unset;cursor:pointer;text-align:center;padding:13px;border-radius:10px;background:var(--surface2);color:var(--muted);font-weight:700;font-size:13px;" data-action="skipEffortPrompt">Omitir</button>
+          <button type="button" style="flex:1;all:unset;cursor:pointer;text-align:center;padding:13px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:800;font-size:13px;" data-action="saveEffort">Guardar</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 // Ventana que se muestra una vez al entrar a la app (login o volver a abrirla), con el
@@ -1517,12 +1557,19 @@ function renderSessionBody(d, expandedForced) {
               <span class="tag-outline">${d.sessionInfo.typeTag}</span>
             </div>
             <div class="today-title">${d.day} · ${d.sessionInfo.title}</div>
+            ${renderEffortChip(state.profile, d.key)}
           </div>
         </div>
         <button class="done-btn" style="background:${d.done ? "color-mix(in oklch, var(--good) 20%, transparent)" : "var(--surface2)"};color:${d.done ? "var(--good)" : "var(--text)"}" data-action="toggleDoneStop" data-key="${d.key}">${d.done ? "COMPLETADO ✓" : "MARCAR COMPLETADO"}</button>
       </div>
       ${expanded ? renderStravaActual(state.profile, d.key) + renderBlocksGrid(d.sessionInfo.blocks) : ""}
     </div>`;
+}
+
+function renderEffortChip(profile, key) {
+  const v = profile.effortByKey ? profile.effortByKey[key] : undefined;
+  if (v == null) return "";
+  return `<div style="font-size:10.5px;font-weight:700;color:var(--muted);margin-top:4px;">Esfuerzo percibido: <span style="color:var(--accent);">${effortLabelFor(v)}</span></div>`;
 }
 
 function renderStravaActual(profile, key) {
@@ -1647,6 +1694,7 @@ function renderPlan(m) {
                       <span class="day-date-inline">${d.day}${dateLabel ? ` · ${dateLabel}` : ""}</span>
                     </div>
                     <div class="today-title">${d.sessionInfo.title}</div>
+                    ${renderEffortChip(state.profile, d.key)}
                   </div>
                 </div>
                 <div class="session-row-actions">
@@ -3268,6 +3316,7 @@ function renderCoachDetail() {
                   : ""
               }
             </div>
+            ${d.hasSession ? `<div style="padding:0 16px 12px;">${renderEffortChip(profile, d.key)}</div>` : ""}
             ${d.hasSession && d.expanded ? renderStravaActual(profile, d.key) + renderBlocksGrid(d.sessionInfo, d.i) : ""}
           </div>`
           )
@@ -3338,6 +3387,12 @@ function bindDynamicListeners() {
         if (e.key === "Enter") ACTIONS[el.getAttribute("data-enter-action")]();
       });
     }
+  });
+  root.querySelectorAll('[data-bind="effortPromptValue"]').forEach((el) => {
+    el.addEventListener("input", () => {
+      const label = root.querySelector(".effort-modal-label");
+      if (label) label.textContent = effortLabelFor(Number(el.value));
+    });
   });
   root.querySelectorAll('[data-action="broadcastInput"]').forEach((el) => {
     el.addEventListener("input", () => {
@@ -3562,7 +3617,18 @@ root.addEventListener("click", (e) => {
   const action = el.getAttribute("data-action");
   if (action === "toggleDoneStop") {
     e.stopPropagation();
-    ACTIONS.toggleDone(el.dataset.key);
+    const key = el.dataset.key;
+    const wasDone = !!state.profile.completed[key];
+    ACTIONS.toggleDone(key);
+    if (!wasDone) {
+      setState({ effortPromptKey: key, effortPromptValue: 5 });
+    } else {
+      setProfile((p) => {
+        const effortByKey = { ...p.effortByKey };
+        delete effortByKey[key];
+        return { effortByKey };
+      });
+    }
     return;
   }
   const fn = ACTIONS[action];
@@ -3923,6 +3989,14 @@ const ACTIONS = {
     }));
     setState({ screen: "onboarding", onboardingStep: 4, weekIndex: 0, expandedKey: null, selectedDayIdx: null, athleteTab: "panel" });
   },
+  saveEffort: () => {
+    const key = state.effortPromptKey;
+    if (!key) return;
+    const value = Number(state.effortPromptValue);
+    setProfile((p) => ({ effortByKey: { ...p.effortByKey, [key]: value } }));
+    setState({ effortPromptKey: null });
+  },
+  skipEffortPrompt: () => setState({ effortPromptKey: null }),
   toggleDone: (key) => {
     const k = typeof key === "string" ? key : key.dataset.key;
     setProfile((p) => ({ completed: { ...p.completed, [k]: !p.completed[k] } }));
