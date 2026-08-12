@@ -1098,6 +1098,23 @@ button {
   line-height: 1.4;
 }
 
+.stats-toggle-row {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 13px 16px;
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -2285,9 +2302,24 @@ button {
 }
 
 @media (max-width: 560px) {
-  .stats-grid,
-  .day-chips {
+  .stats-grid {
     grid-template-columns: 1fr 1fr;
+  }
+  /* Fila de 7 dias en grilla ocupaba mucho alto en mobile — pasa a tira horizontal
+     deslizable, mismo patron que la tabbar inferior, para bajar la carga visual. */
+  .day-chips {
+    display: flex;
+    grid-template-columns: unset;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .day-chips::-webkit-scrollbar {
+    display: none;
+  }
+  .day-chip {
+    flex: 0 0 76px;
   }
   .blocks-grid,
   .perfil-grid,

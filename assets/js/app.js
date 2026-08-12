@@ -433,6 +433,7 @@ let state = {
   selectedDayIdx: null,
   movingDayIdx: null, // índice del día que el atleta está por mover a otro día de la semana
   planMenuOpen: false,
+  statsExpanded: false, // Panel: las 4 estadisticas de la semana arrancan colapsadas (menos carga visual en mobile)
   effortPromptKey: null, // key del día que está pidiendo el esfuerzo percibido tras marcarlo completado
   effortPromptValue: 5,
   chatInput: "",
@@ -1500,7 +1501,13 @@ function renderPanel(m, firstName, avatarLetter) {
       </div>
     </div>
 
-    <div class="stats-grid">
+    <button type="button" class="stats-toggle-row" data-action="toggleStatsExpanded">
+      <span>${m.doneKm.toFixed(1)} / ${m.totalKm.toFixed(1)} km · ${m.pct}% del plan</span>
+      <span class="expand-label">${state.statsExpanded ? "OCULTAR ▴" : "VER ESTADÍSTICAS ▾"}</span>
+    </button>
+    ${
+      state.statsExpanded
+        ? `<div class="stats-grid">
       <div class="stat-box"><div class="label">VOL. SEMANAL</div><div class="value">${m.doneKm.toFixed(1)} / ${m.totalKm.toFixed(1)} km</div></div>
       <div class="stat-box"><div class="label">% PLAN CUMPLIDO</div><div class="value">${m.pct}%</div></div>
       <div class="stat-box"><div class="label">ESTADO DE CARGA</div><div class="value" style="color:${m.weekMeta.isDeload ? "var(--warn)" : m.acwrStatus.color}">${m.weekMeta.isDeload ? "Descarga" : m.acwrStatus.label}</div></div>
@@ -1509,18 +1516,19 @@ function renderPanel(m, firstName, avatarLetter) {
         <div class="value">${m.doneKm.toFixed(1)} km</div>
         <div class="sub">${ICONS.lightning.replace('width="19" height="19"', 'width="11" height="11"')} ${state.profile.stravaStatus === "connected" ? "Sincronizado con Strava · hace 2h" : "Sin conectar a Strava"}</div>
       </div>
-    </div>
+    </div>`
+        : ""
+    }
 
     <div class="section-heading-row">
       <div class="heading">${m.todayHeading}</div>
-      <span class="phase-pill">${m.phaseLabelShort}</span>
     </div>
 
     <div class="today-card">
       ${
         m.todayDay.isRest
           ? `<div class="today-rest"><div class="title">Día de descanso</div><div class="sub">Aprovechá para recuperar. Mañana seguimos.</div></div>`
-          : renderSessionBody(m.todayDay, true)
+          : renderSessionBody(m.todayDay, false)
       }
     </div>
 
@@ -1548,21 +1556,22 @@ function renderSessionBody(d, expandedForced) {
   const expanded = expandedForced || d.expanded;
   return `
     <div class="today-body">
-      <div class="today-top">
+      <div class="today-top" data-action="toggleExpand" data-key="${d.key}" style="cursor:pointer;">
         <div class="session-row-left">
           <div class="today-icon">${sessionIcon(d.sessionInfo.typeTag)}</div>
           <div>
             <div class="tag-row">
               <span class="tag-solid">${d.sessionInfo.phaseTag}</span>
-              <span class="tag-outline">${d.sessionInfo.typeTag}</span>
+              <span class="day-date-inline">${d.day}</span>
             </div>
-            <div class="today-title">${d.day} · ${d.sessionInfo.title}</div>
+            <div class="today-title">${d.sessionInfo.title}</div>
             ${renderEffortChip(state.profile, d.key)}
           </div>
         </div>
-        <button class="done-btn" style="background:${d.done ? "color-mix(in oklch, var(--good) 20%, transparent)" : "var(--surface2)"};color:${d.done ? "var(--good)" : "var(--text)"}" data-action="toggleDoneStop" data-key="${d.key}">${d.done ? "COMPLETADO ✓" : "MARCAR COMPLETADO"}</button>
+        <span class="expand-label">${expanded ? "OCULTAR ▴" : "VER DETALLES ▾"}</span>
       </div>
       ${expanded ? renderStravaActual(state.profile, d.key) + renderBlocksGrid(d.sessionInfo.blocks) : ""}
+      <button class="done-btn" style="width:100%;margin-top:${expanded ? "16px" : "0"};background:${d.done ? "color-mix(in oklch, var(--good) 20%, transparent)" : "var(--surface2)"};color:${d.done ? "var(--good)" : "var(--text)"}" data-action="toggleDoneStop" data-key="${d.key}">${d.done ? "COMPLETADO ✓" : "MARCAR COMPLETADO"}</button>
     </div>`;
 }
 
@@ -3967,6 +3976,7 @@ const ACTIONS = {
     setState({ movingDayIdx: null, expandedKey: null });
   },
   togglePlanMenu: () => setState((s) => ({ planMenuOpen: !s.planMenuOpen })),
+  toggleStatsExpanded: () => setState((s) => ({ statsExpanded: !s.statsExpanded })),
   resetPlanProgress: () => {
     setState({ planMenuOpen: false });
     if (!confirm("¿Reiniciar el progreso del plan actual? Se borrarán los entrenamientos marcados como completados y las sincronizaciones de Strava, pero mantenés el mismo objetivo y nivel.")) return;
